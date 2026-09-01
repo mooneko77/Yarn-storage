@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>毛線庫存收納圖鑑</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fffbeb',
+                            100: '#fef3c7',
+                            400: '#fbbf24',
+                            500: '#f59e0b',
+                            600: '#d97706',
+                        },
+                        tagGreen: '#84cc16',
+                        tagOrange: '#f97316'
+                    },
+                    boxShadow: {
+                        'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+                        'card': '0 2px 10px rgba(0, 0, 0, 0.03)',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <!-- SheetJS (Excel Engine) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang TC", "Hiragino Sans GB", "Microsoft JhengHei", sans-serif;
+            background-color: #f8fafc;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="min-h-screen text-slate-800 pb-28 select-none">
+
+    <!-- 頂部精緻 Header -->
+    <header class="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-100 px-4 pt-3 pb-2.5 shadow-sm">
+        <!-- 頂部狀態列與標題 -->
+        <div class="max-w-md mx-auto flex items-center justify-between mb-2.5">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center font-bold text-sm">
+                    🧶
+                </div>
+                <h1 class="text-base font-bold text-slate-900 tracking-tight" id="pageTitle">全部物品</h1>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button onclick="downloadExcelTemplate()" class="p-1.5 text-slate-500 hover:text-amber-500 rounded-lg text-sm transition" title="下載 Excel 範本">
+                    <i class="fa-solid fa-file-excel"></i>
+                </button>
+                <label class="p-1.5 text-slate-500 hover:text-amber-500 rounded-lg text-sm cursor-pointer transition" title="匯入 Excel">
+                    <i class="fa-solid fa-file-import"></i>
+                    <input type="file" accept=".xlsx, .csv" onchange="handleExcelUpload(event)" class="hidden">
+                </label>
+            </div>
+        </div>
+
+        <!-- 搜尋欄 -->
+        <div class="max-w-md mx-auto relative mb-2.5">
+            <input type="text" id="searchInput" oninput="renderYarns()" 
+                   placeholder="搜尋品牌、顏色、材質、收納箱..." 
+                   class="w-full pl-9 pr-8 py-2 bg-slate-100/80 rounded-xl text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:bg-white transition placeholder-slate-400">
+            <i class="fa-solid fa-magnifying-glass absolute left-3.2 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+        </div>
+
+        <!-- 分類橫向切換頁籤 (Pills) -->
+        <div class="max-w-md mx-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5" id="categoryPills">
+            <!-- 由 JavaScript 動態生成分類按鈕 -->
+        </div>
+    </header>
+
+    <!-- 主卡片區域 -->
+    <main class="max-w-md mx-auto px-3.5 pt-3.5">
+        
+        <!-- 2 欄式圖鑑網格 -->
+        <div id="yarnGrid" class="grid grid-cols-2 gap-3">
+            <!-- 物品卡片 -->
+        </div>
+
+        <!-- 無資料提示 -->
+        <div id="emptyState" class="hidden text-center py-20">
+            <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center text-2xl shadow-soft">
+                📦
+            </div>
+            <p class="text-sm font-bold text-slate-700">尚未找到物品</p>
+            <p class="text-xs text-slate-400 mt-1">點擊右下角「+」或頂部按鈕匯入資料</p>
+        </div>
+    </main>
+
+    <!-- 右下角浮動新增按鈕 (FAB) -->
+    <button onclick="openAddModal()" 
+            class="fixed right-5 bottom-20 z-40 w-13 h-13 rounded-full bg-gradient-to-tr from-amber-500 to-amber-400 text-white shadow-lg shadow-amber-500/30 flex items-center justify-center text-xl active:scale-95 transition-transform">
+        <i class="fa-solid fa-plus"></i>
+    </button>
+
+    <!-- 底部導覽列 -->
+    <nav class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-100 px-6 py-2 flex justify-between items-center text-slate-400">
+        <button class="flex flex-col items-center gap-0.5 text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-house text-base"></i>
+            <span class="text-[10px]">房間</span>
+        </button>
+        <button class="flex flex-col items-center gap-0.5 text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-boxes-stacked text-base"></i>
+            <span class="text-[10px]">物品</span>
+        </button>
+        <button class="flex flex-col items-center gap-0.5 text-amber-500 font-bold">
+            <div class="w-8 h-8 rounded-xl bg-amber-100/80 flex items-center justify-center text-amber-600 text-sm shadow-sm">
+                <i class="fa-solid fa-book-bookmark"></i>
+            </div>
+            <span class="text-[10px]">記物品</span>
+        </button>
+        <button class="flex flex-col items-center gap-0.5 text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-layer-group text-base"></i>
+            <span class="text-[10px]">品類</span>
+        </button>
+        <button class="flex flex-col items-center gap-0.5 text-slate-400 hover:text-slate-600">
+            <i class="fa-solid fa-user text-base"></i>
+            <span class="text-[10px]">我的</span>
+        </button>
+    </nav>
+
+    <!-- 新增 / 編輯 Modal 彈窗 -->
+    <div id="addModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-end justify-center hidden">
+        <div class="bg-white w-full max-w-md rounded-t-3xl p-5 shadow-2xl animate-slide-up max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+                <h3 class="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <i class="fa-solid fa-pen-to-square text-amber-500"></i> 新增毛線物品
+                </h3>
+                <button onclick="closeAddModal()" class="text-slate-400 hover:text-slate-600 text-base w-7 h-7 flex items-center justify-center rounded-full bg-slate-100">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="yarnForm" onsubmit="handleSaveYarn(event)" class="space-y-3.5 text-xs">
+                <div>
+                    <label class="block font-medium text-slate-600 mb-1">品牌 / 系列名稱 *</label>
+                    <input type="text" id="inputBrand" required placeholder="例如：小萌仔 / Katia" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:bg-white transition">
+                </div>
+
+                <div>
+                    <label class="block font-medium text-slate-600 mb-1">色號 / 顏色規格 *</label>
+                    <input type="text" id="inputName" required placeholder="例如：雪球 - 35海棠色" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:bg-white transition">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block font-medium text-slate-600 mb-1">左上標籤 (如：3.50)</label>
+                        <input type="text" id="inputSpecTag" placeholder="例如：3.50 或 50g" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block font-medium text-slate-600 mb-1">圖片下方價格標籤</label>
+                        <input type="text" id="inputPriceTag" placeholder="例如：¥6.90 或 $120" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:bg-white transition">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block font-medium text-slate-600 mb-1">庫存球數 (右下數字)</label>
+                        <input type="number" id="inputQuantity" value="1" min="0" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:bg-white transition">
+                    </div>
+                    <div>
+                        <label class="block font-medium text-slate-600 mb-1">分類標籤</label>
+                        <select id="inputCategory" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:bg-white transition">
+                            <option value="冰條线">冰條線</option>
+                            <option value="牛奶棉">牛奶棉</option>
+                            <option value="噴毛紗">噴毛紗</option>
+                            <option value="羊毛線">羊毛線</option>
+                            <option value="其他">其他線材</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-medium text-slate-600 mb-1">圖片 URL 連結</label>
+                    <input type="url" id="inputImageUrl" placeholder="https://..." class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 focus:bg-white transition">
+                </div>
+
+                <div class="pt-2 flex gap-2.5">
+                    <button type="button" onclick="closeAddModal()" class="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-semibold">取消</button>
+                    <button type="submit" class="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-400 text-white rounded-xl font-bold shadow-md shadow-amber-500/20">儲存資料</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Firebase 邏輯與互動 script -->
+    <script>
+        // Firebase 連線配置
+        const firebaseConfig = {
+            apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
+            authDomain: "yarn-storage.firebaseapp.com",
+            projectId: "yarn-storage",
+            storageBucket: "yarn-storage.firebasestorage.app",
+            messagingSenderId: "355907288134",
+            appId: "1:355907288134:web:8aa9c0bcef363137415e47"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        let allItems = [];
+        let activeCategory = '全部';
+
+        // 展示範例數據
+        const demoItems = [
+            {
+                id: '1',
+                brand: '小萌仔',
+                name: '雪球 - 35海棠色',
+                specTag: '3.50',
+                priceTag: '',
+                quantity: 2,
+                category: '冰條線',
+                imageUrl: 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=400&auto=format&fit=crop&q=60'
+            },
+            {
+                id: '2',
+                brand: '小萌仔',
+                name: '雪球 - 11淺紫色',
+                specTag: '3.50',
+                priceTag: '',
+                quantity: 1,
+                category: '冰條線',
+                imageUrl: 'https://images.unsplash.com/photo-1608256246200-53e635b5b65f?w=400&auto=format&fit=crop&q=60'
+            },
+            {
+                id: '3',
+                brand: '牛奶棉',
+                name: '牛奶棉 - 珊瑚紅',
+                specTag: '',
+                priceTag: '¥6.90',
+                quantity: 1,
+                category: '牛奶棉',
+                imageUrl: 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=400&auto=format&fit=crop&q=60'
+            },
+            {
+                id: '4',
+                brand: '沁柔噴毛紗',
+                name: '沁柔 - 彩虹漸層',
+                specTag: '',
+                priceTag: '¥13',
+                quantity: 1,
+                category: '噴毛紗',
+                imageUrl: 'https://images.unsplash.com/photo-1608256246200-53e635b5b65f?w=400&auto=format&fit=crop&q=60'
+            }
+        ];
+
+        // 訂閱 Firebase Firestore 變化
+        db.collection('yarns').onSnapshot((snapshot) => {
+            if (snapshot.empty) {
+                allItems = demoItems;
+            } else {
+                allItems = [];
+                snapshot.forEach((doc) => {
+                    allItems.push({ id: doc.id, ...doc.data() });
+                });
+            }
+            renderCategories();
+            renderYarns();
+        }, (err) => {
+            allItems = demoItems;
+            renderCategories();
+            renderYarns();
+        });
+
+        // 渲染分類 Pill 按鈕
+        function renderCategories() {
+            const categories = ['全部', '冰條線', '牛奶棉', '噴毛紗', '羊毛線'];
+            const container = document.getElementById('categoryPills');
+
+            container.innerHTML = categories.map(cat => {
+                const isActive = activeCategory === cat;
+                return `
+                    <button onclick="setCategory('${cat}')" 
+                            class="px-3.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                                isActive 
+                                ? 'bg-amber-400 text-white shadow-sm' 
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80'
+                            }">
+                        ${cat}
+                    </button>
+                `;
+            }).join('');
+        }
+
+        function setCategory(cat) {
+            activeCategory = cat;
+            document.getElementById('pageTitle').textContent = cat === '全部' ? '全部物品' : `${cat} 清單`;
+            renderCategories();
+            renderYarns();
+        }
+
+        // 渲染物品網格卡片
+        function renderYarns() {
+            const grid = document.getElementById('yarnGrid');
+            const emptyState = document.getElementById('emptyState');
+            const search = document.getElementById('searchInput').value.toLowerCase().trim();
+
+            const filtered = allItems.filter(item => {
+                const matchesSearch = 
+                    (item.brand || '').toLowerCase().includes(search) ||
+                    (item.name || '').toLowerCase().includes(search) ||
+                    (item.category || '').toLowerCase().includes(search);
+
+                const matchesCat = activeCategory === '全部' || item.category === activeCategory;
+                return matchesSearch && matchesCat;
+            });
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            grid.innerHTML = filtered.map(item => `
+                <div class="bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-card flex flex-col relative group hover:shadow-soft transition-shadow duration-300">
+                    
+                    <!-- 圖片容器 -->
+                    <div class="relative aspect-square w-full bg-slate-50 overflow-hidden flex items-center justify-center p-2">
+                        <img src="${item.imageUrl || 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=400&auto=format&fit=crop&q=60'}" 
+                             alt="${item.name}" 
+                             class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300">
+
+                        <!-- 左上角綠色規格標籤 (如: 3.50) -->
+                        ${item.specTag ? `
+                            <span class="absolute top-2 left-2 bg-lime-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-xs">
+                                ${item.specTag}
+                            </span>
+                        ` : ''}
+
+                        <!-- 圖片下方灰黑條 (如: ¥6.90) -->
+                        ${item.priceTag ? `
+                            <div class="absolute bottom-0 left-0 right-0 bg-slate-900/40 backdrop-blur-xs text-white text-[10px] font-medium text-center py-0.5">
+                                ${item.priceTag}
+                            </div>
+                        ` : ''}
+
+                        <!-- 右下角橘色數量圓標 -->
+                        <div class="absolute bottom-2 right-2 bg-amber-500 text-white text-xs font-extrabold w-5 h-5 rounded-md flex items-center justify-center shadow-xs">
+                            ${item.quantity || 1}
+                        </div>
+                    </div>
+
+                    <!-- 文字介紹 -->
+                    <div class="p-2.5 flex-1 flex flex-col justify-between">
+                        <div>
+                            <h3 class="font-bold text-slate-800 text-xs leading-tight line-clamp-1">${item.brand || '未命名'}</h3>
+                            <p class="text-[11px] text-slate-400 mt-1 leading-tight line-clamp-1">${item.name || ''}</p>
+                        </div>
+                        <div class="mt-2.5 flex justify-between items-center text-[10px] text-slate-400 pt-1 border-t border-slate-50">
+                            <span>庫存 ${item.quantity || 1} 包/球</span>
+                            <button onclick="deleteYarn('${item.id}')" class="text-slate-300 hover:text-rose-500 transition-colors p-1">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function openAddModal() {
+            document.getElementById('yarnForm').reset();
+            document.getElementById('addModal').classList.remove('hidden');
+        }
+
+        function closeAddModal() {
+            document.getElementById('addModal').classList.add('hidden');
+        }
+
+        async function handleSaveYarn(e) {
+            e.preventDefault();
+            const newItem = {
+                brand: document.getElementById('inputBrand').value.trim(),
+                name: document.getElementById('inputName').value.trim(),
+                specTag: document.getElementById('inputSpecTag').value.trim(),
+                priceTag: document.getElementById('inputPriceTag').value.trim(),
+                quantity: Number(document.getElementById('inputQuantity').value) || 1,
+                category: document.getElementById('inputCategory').value,
+                imageUrl: document.getElementById('inputImageUrl').value.trim() || 'https://images.unsplash.com/photo-1584100936595-c0654b55a2e2?w=400&auto=format&fit=crop&q=60',
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            try {
+                await db.collection('yarns').add(newItem);
+                closeAddModal();
+            } catch (err) {
+                allItems.unshift({ id: Date.now().toString(), ...newItem });
+                renderYarns();
+                closeAddModal();
+            }
+        }
+
+        async function deleteYarn(id) {
+            if (confirm('確定要刪除這項物品嗎？')) {
+                try {
+                    await db.collection('yarns').doc(id).delete();
+                } catch (err) {
+                    allItems = allItems.filter(i => i.id !== id);
+                    renderYarns();
+                }
+            }
+        }
+
+        function handleExcelUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (evt) => {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const jsonRows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+                jsonRows.forEach(row => {
+                    const item = {
+                        brand: String(row['品牌'] || row['Brand'] || '未命名').trim(),
+                        name: String(row['規格'] || row['Name'] || '').trim(),
+                        specTag: String(row['標籤'] || row['Spec'] || '').trim(),
+                        priceTag: String(row['價格'] || row['Price'] || '').trim(),
+                        quantity: Number(row['數量'] || row['Quantity'] || 1),
+                        category: String(row['分類'] || row['Category'] || '冰條線').trim(),
+                        imageUrl: String(row['圖片連結'] || row['Image'] || '').trim()
+                    };
+                    db.collection('yarns').add(item);
+                });
+                alert('🎉 Excel 成功匯入 Firebase！');
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function downloadExcelTemplate() {
+            const data = [
+                { '品牌': '小萌仔', '規格': '雪球 - 35海棠色', '標籤': '3.50', '價格': '', '數量': 2, '分類': '冰條線', '圖片連結': '' },
+                { '品牌': '牛奶棉', '規格': '牛奶棉 - 櫻花粉', '標籤': '', '價格': '¥6.90', '數量': 1, '分類': '牛奶棉', '圖片連結': '' }
+            ];
+            const ws = XLSX.utils.json_to_sheet(data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "毛線收納範本");
+            XLSX.writeFile(wb, "毛線收納測試範本.xlsx");
+        }
+    </script>
+</body>
+</html>
