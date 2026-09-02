@@ -1,855 +1,531 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
-import { Plus, Minus, Trash2, Edit2, Package, Tag, Loader2, X, Image as ImageIcon, Upload, Search, Camera, PlusCircle, ChevronDown, MessageCircle, Send, Bot, Minimize2 } from 'lucide-react';
-
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-function AutocompleteInput({ label, name, value, options, onChange, placeholder, required }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const inputRef = useRef(null);
-
-  const filteredOptions = options.filter(opt =>
-    opt.toLowerCase().includes((value || '').toLowerCase()) && opt !== value
-  );
-
-  return (
-    <div className="space-y-1.5 relative">
-      <label className="text-xs font-bold text-slate-500">
-        {label} {required && <span className="text-red-400">*</span>}
-      </label>
-      <div className="relative">
-        <input
-          ref={inputRef}
-          type="text"
-          name={name}
-          value={value}
-          onChange={(e) => {
-            onChange(e);
-            setIsOpen(true);
-          }}
-          onFocus={() => setIsOpen(true)}
-          onBlur={() => setIsOpen(false)}
-          placeholder={placeholder}
-          required={required}
-          className="w-full pl-3 pr-8 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm transition-all"
-        />
-        <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-          <ChevronDown className="w-4 h-4" />
-        </div>
-      </div>
-
-      {isOpen && filteredOptions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-purple-100 rounded-xl shadow-lg max-h-48 overflow-y-auto py-1">
-          {filteredOptions.map(opt => (
-            <div
-              key={opt}
-              onMouseDown={(e) => {
-                e.preventDefault(); // 避免點擊時輸入框失去焦點
-                onChange({ target: { name, value: opt } });
-                setIsOpen(false);
-                inputRef.current?.blur();
-              }}
-              className="px-3 py-2 text-sm text-slate-700 hover:bg-purple-50 hover:text-purple-700 cursor-pointer transition-colors"
-            >
-              {opt}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [yarns, setYarns] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeFilter, setActiveFilter] = useState('全部'); // 新增：目前選擇的大項分類
-  
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatMessages, setChatMessages] = useState([
-    { role: 'model', text: '你好！我是你的 AI 毛線顧問。我可以幫你查看庫存、尋找特定的毛線，或者根據你現有的毛線提供編織建議喔！有什麼我可以幫忙的嗎？' }
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const chatEndRef = useRef(null);
-
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [formData, setFormData] = useState({
-    brand: '',
-    color: '', // 改為精確的顏色欄位
-    category: '', // 儲存「品項」資料
-    material: '', // 儲存「材質」資料
-    quantity: 1,
-    price: 0,
-    imageUrl: '', // 儲存 Base64 圖片資料或網址
-    customFields: [] // 新增：自訂欄位 [{ key: '', value: '' }]
-  });
-
-  const fileInputRef = useRef(null);
-  const imageInputRef = useRef(null); // 用於上傳圖片
-
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatMessages, isChatOpen]);
-
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!chatInput.trim() || isChatLoading) return;
-
-    const userMessage = chatInput.trim();
-    setChatInput('');
-    setChatMessages(prev => [...prev, { role: 'user', text: userMessage }]);
-    setIsChatLoading(true);
-
-    try {
-      // 準備簡化的庫存資料作為 Context
-      const inventoryContext = yarns.map(y => ({
-        品牌: y.brand,
-        顏色: y.color,
-        品項: y.category,
-        材質: y.material,
-        數量: y.quantity
-      }));
-
-      const systemPrompt = `你是一個專業且友善的「AI 毛線顧問」。你正在協助使用者管理他的毛線倉庫。
-以下是使用者目前的毛線庫存概況 (JSON 格式)：
-${JSON.stringify(inventoryContext)}
-
-你的任務：
-1. 根據使用者的問題，查詢並統整上述庫存資訊來回答。
-2. 如果使用者詢問可以做什麼作品，請根據他擁有的毛線材質和數量給出具體的編織/鉤針建議。
-3. 回答一般的編織問題。
-4. 語氣要溫暖、鼓勵人，使用繁體中文 (台灣用語)。盡量簡潔，不要給出過長的文章。`;
-
-      const formattedHistory = chatMessages.map(msg => ({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }]
-      }));
-
-      const payload = {
-        contents: [
-          ...formattedHistory,
-          { role: 'user', parts: [{ text: userMessage }] }
-        ],
-        systemInstruction: {
-          parts: [{ text: systemPrompt }]
-        }
-      };
-
-      const apiKey = ""; // 讓平台自動注入 API Key
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await response.json();
-      
-      if (data.candidates && data.candidates[0].content.parts[0].text) {
-        const modelReply = data.candidates[0].content.parts[0].text;
-        setChatMessages(prev => [...prev, { role: 'model', text: modelReply }]);
-      } else {
-        throw new Error("Invalid response format");
-      }
-    } catch (error) {
-      console.error("Gemini API Error:", error);
-      setChatMessages(prev => [...prev, { role: 'model', text: '抱歉，我的大腦暫時連不上線，請稍後再試！' }]);
-    } finally {
-      setIsChatLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth error:", error);
-      }
-    };
-    initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (!currentUser) setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-
-    setLoading(true);
-    const yarnsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'yarns');
-    
-    const unsubscribe = onSnapshot(yarnsRef, (snapshot) => {
-      const yarnsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      yarnsData.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setYarns(yarnsData);
-      setLoading(false);
-    }, (error) => {
-      console.error("Firestore error:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // 新增：提取所有不重複的分類作為大項標籤
-  const categories = useMemo(() => {
-    const cats = new Set(yarns.map(y => y.category?.trim() || '未分類'));
-    return ['全部', ...Array.from(cats)];
-  }, [yarns]);
-
-  const existingBrands = useMemo(() => Array.from(new Set(yarns.map(y => y.brand?.trim()).filter(b => b && b !== '未分類'))), [yarns]);
-  const existingColors = useMemo(() => Array.from(new Set(yarns.map(y => (y.color || y.name)?.trim()).filter(c => c))), [yarns]);
-  const existingCategories = useMemo(() => Array.from(new Set(yarns.map(y => y.category?.trim()).filter(c => c))), [yarns]);
-  const existingMaterials = useMemo(() => Array.from(new Set(yarns.map(y => y.material?.trim()).filter(m => m))), [yarns]);
-
-  const filteredYarns = useMemo(() => {
-    return yarns.filter(yarn => {
-      const matchSearch = (yarn.color || yarn.name)?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        yarn.brand?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        yarn.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        yarn.material?.toLowerCase().includes(searchTerm.toLowerCase()); // 也允許搜尋材質
-      
-      const itemCategory = yarn.category?.trim() || '未分類';
-      const matchFilter = activeFilter === '全部' || itemCategory === activeFilter;
-
-      return matchSearch && matchFilter;
-    });
-  }, [yarns, searchTerm, activeFilter]);
-
-  const stats = useMemo(() => {
-    return yarns.reduce((acc, yarn) => ({
-      totalItems: acc.totalItems + Number(yarn.quantity || 0),
-      totalValue: acc.totalValue + (Number(yarn.quantity || 0) * Number(yarn.price || 0))
-    }), { totalItems: 0, totalValue: 0 });
-  }, [yarns]);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  // 自訂欄位操作
-  const addCustomField = () => {
-    setFormData(prev => ({
-      ...prev,
-      customFields: [...(prev.customFields || []), { key: '', value: '' }]
-    }));
-  };
-
-  const updateCustomField = (index, field, value) => {
-    const newFields = [...formData.customFields];
-    newFields[index][field] = value;
-    setFormData(prev => ({ ...prev, customFields: newFields }));
-  };
-
-  const removeCustomField = (index) => {
-    const newFields = formData.customFields.filter((_, i) => i !== index);
-    setFormData(prev => ({ ...prev, customFields: newFields }));
-  };
-
-  // 圖片壓縮與處理 (強制 1:1 正方形裁切)
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_SIZE = 400; // 固定為 400x400 的正方形
-        
-        // 尋找較短的邊作為正方形的邊長
-        let size = Math.min(img.width, img.height); 
-        
-        // 計算裁切的起始點 (將長邊置中裁切)
-        let sx = (img.width - size) / 2; 
-        let sy = (img.height - size) / 2; 
-
-        canvas.width = MAX_SIZE;
-        canvas.height = MAX_SIZE;
-        const ctx = canvas.getContext('2d');
-        
-        // 將圖片置中裁切並繪製到 400x400 的畫布上
-        ctx.drawImage(img, sx, sy, size, size, 0, 0, MAX_SIZE, MAX_SIZE);
-        
-        // 壓縮圖片品質為 0.7
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-        setFormData(prev => ({ ...prev, imageUrl: compressedBase64 }));
-      };
-    };
-    reader.readAsDataURL(file);
-    if (imageInputRef.current) imageInputRef.current.value = '';
-  };
-
-  const openAddForm = () => {
-    setFormData({ brand: '', color: '', category: '', material: '', quantity: 1, price: 0, imageUrl: '', customFields: [] });
-    setEditingId(null);
-    setIsFormOpen(true);
-  };
-
-  const openEditForm = (yarn) => {
-    setFormData({
-      brand: yarn.brand || '',
-      color: yarn.color || yarn.name || '',
-      category: yarn.category || '',
-      material: yarn.material || '',
-      quantity: yarn.quantity || 0,
-      price: yarn.price || 0,
-      imageUrl: yarn.imageUrl || '',
-      customFields: yarn.customFields || []
-    });
-    setEditingId(yarn.id);
-    setIsFormOpen(true);
-  };
-
-  const saveYarn = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-
-    const yarnsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'yarns');
-    // 過濾掉空白的自訂欄位
-    const validCustomFields = formData.customFields.filter(f => f.key.trim() !== '' && f.value.trim() !== '');
-
-    const yarnData = {
-      brand: formData.brand.trim() || '未分類',
-      color: formData.color.trim() || '未命名',
-      category: formData.category.trim(),
-      material: formData.material.trim(),
-      quantity: Math.max(0, Number(formData.quantity)),
-      price: Math.max(0, Number(formData.price)),
-      imageUrl: formData.imageUrl,
-      customFields: validCustomFields,
-      updatedAt: Date.now()
-    };
-
-    try {
-      if (editingId) {
-        const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'yarns', editingId);
-        await updateDoc(docRef, yarnData);
-      } else {
-        await addDoc(yarnsRef, { ...yarnData, createdAt: Date.now() });
-      }
-      setIsFormOpen(false);
-    } catch (error) {
-      console.error("Error saving yarn:", error);
-    }
-  };
-
-  const adjustQuantity = async (id, currentQuantity, change) => {
-    if (!user) return;
-    const newQuantity = Math.max(0, Number(currentQuantity) + change);
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'yarns', id);
-    try {
-      await updateDoc(docRef, { quantity: newQuantity, updatedAt: Date.now() });
-    } catch (error) {
-      console.error("Error updating quantity:", error);
-    }
-  };
-
-  const deleteYarn = async (id) => {
-    if (!user) return;
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'yarns', id);
-    try {
-      await deleteDoc(docRef);
-    } catch (error) {
-      console.error("Error deleting yarn:", error);
-    }
-  };
-
-  const handleCSVUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file || !user) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const text = event.target.result;
-        const lines = text.split('\n');
-        if (lines.length <= 1) return;
-
-        const batch = writeBatch(db);
-        let count = 0;
-
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          
-          // 支援格式: 品牌, 顏色, 品項, 材質, 數量, 單價, 圖片網址
-          const columns = line.split(',').map(col => col.replace(/^"(.*)"$/, '$1').trim());
-          
-          if (columns.length >= 2) {
-            const yarnData = {
-              brand: columns[0] || '未分類',
-              color: columns[1] || '未命名',
-              category: columns[2] || '',
-              material: columns[3] || '',
-              quantity: Math.max(0, Number(columns[4]) || 0),
-              price: Math.max(0, Number(columns[5]) || 0),
-              imageUrl: columns[6] || '',
-              customFields: [],
-              createdAt: Date.now(),
-              updatedAt: Date.now()
-            };
-
-            const docRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'yarns'));
-            batch.set(docRef, yarnData);
-            count++;
-          }
-        }
-
-        if (count > 0) {
-          await batch.commit();
-          console.log(`成功匯入 ${count} 筆資料！`);
-        }
-      } catch (error) {
-        console.error("CSV 匯入錯誤:", error);
-      }
-    };
-    reader.readAsText(file);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-purple-400 animate-spin" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-[#F9F7FA] text-slate-800 font-sans pb-24 md:pb-8">
-      {/* 隱藏網頁捲動條的樣式 */}
-      <style>{`
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>毛線倉庫</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Lucide Icons 圖標庫 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
-      
-      {/* 隱藏的檔案上傳元素 */}
-      <input type="file" accept=".csv" ref={fileInputRef} onChange={handleCSVUpload} className="hidden" />
-      <input type="file" accept="image/*" ref={imageInputRef} onChange={handleImageUpload} className="hidden" />
+    </style>
+</head>
+<body class="bg-[#F9F7FA] text-slate-800 font-sans pb-24 md:pb-8 selection:bg-purple-200">
+    <!-- 隱藏的檔案上傳與圖片選擇 -->
+    <input type="file" id="csvFileInput" accept=".csv" class="hidden" onchange="handleCSVUpload(event)">
+    <input type="file" id="imageFileInput" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
 
-      {/* 頂部導覽 */}
-      <header className="bg-white sticky top-0 z-10 shadow-sm border-b border-purple-100">
-        <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex flex-col sm:flex-row justify-between gap-4 sm:items-center">
-            
-            <div className="flex items-center gap-4 flex-1">
-              <h1 className="text-xl font-bold text-slate-800 whitespace-nowrap hidden sm:block">
-                我的毛線
-              </h1>
-              
-              <div className="relative flex-1 max-w-md">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search className="h-4 w-4 text-purple-300" />
-                </div>
-                <input
-                  type="text"
-                  placeholder="搜尋顏色、品項、品牌..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2 border-none rounded-full bg-purple-50 text-slate-700 placeholder-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-300 sm:text-sm transition-shadow"
-                />
-              </div>
-            </div>
-            
-            <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-              <div className="flex gap-4 text-xs font-medium text-slate-500 whitespace-nowrap bg-white px-3 py-1.5 rounded-full border border-purple-100 shadow-sm">
-                <span>共 <strong className="text-purple-600">{stats.totalItems}</strong> 件</span>
-                <div className="w-px bg-purple-100"></div>
-                <span>價值 <strong className="text-purple-600">¥{stats.totalValue.toLocaleString()}</strong></span>
-              </div>
-              
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-100 hover:bg-purple-200 rounded-full transition-colors whitespace-nowrap"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>匯入 Excel (CSV)</span>
-              </button>
-            </div>
-          </div>
-          
-          {/* 新增：大項分類快速篩選列 */}
-          <div className="mt-3 flex overflow-x-auto gap-2 pb-1 hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setActiveFilter(cat)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
-                  activeFilter === cat
-                    ? 'bg-gradient-to-r from-purple-500 to-purple-400 text-white shadow-md shadow-purple-200'
-                    : 'bg-white text-slate-500 hover:bg-purple-50 border border-purple-100'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-          
-        </div>
-      </header>
-
-      {}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {filteredYarns.length === 0 ? (
-          <div className="text-center py-20">
-            <Package className="w-16 h-16 text-purple-200 mx-auto mb-4" />
-            <h2 className="text-xl font-medium text-slate-600 mb-2">
-              {searchTerm ? '找不到符合的毛線' : '倉庫空空的'}
-            </h2>
-            <p className="text-sm text-slate-400">
-              點擊右下角新增，或使用 Excel 批次匯入資料。
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-            {filteredYarns.map((yarn) => (
-              <div key={yarn.id} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-purple-50 hover:shadow-md transition-all group flex flex-col relative cursor-pointer" onClick={() => openEditForm(yarn)}>
-
-                {/* 圖片區域 */}
-                <div className="aspect-square bg-slate-50 relative">
-                  {yarn.imageUrl ? (
-                    <img 
-                      src={yarn.imageUrl} 
-                      alt={yarn.name}
-                      className="w-full h-full object-cover"
-                      onError={(e) => { e.target.style.display = 'none'; }}
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-purple-100 bg-purple-50/50">
-                      <ImageIcon className="w-10 h-10" />
-                    </div>
-                  )}
-                  
-                  {/* 價格標籤 (左上角) */}
-                  <div className="absolute top-2 left-2 bg-[#a3c959] text-white text-[11px] font-bold px-1.5 py-0.5 rounded-sm shadow-sm">
-                    {yarn.price}
-                  </div>
-
-                  {/* 數量標籤 (橘黃色，綁定在圖片右下角邊緣以防跑版) */}
-                  <div className="absolute -bottom-2.5 right-2 z-10 bg-[#FFAB33] text-white text-xs font-bold px-2.5 py-0.5 rounded-l-full rounded-r-md shadow-sm border-2 border-white">
-                    {yarn.quantity}
-                  </div>
-                </div>
-
-                {/* 文字資訊區 */}
-                <div className="p-3 pt-4 flex flex-col flex-1 bg-white relative">
-                  <h3 className="text-sm font-bold text-slate-800 leading-snug line-clamp-1 mb-1">
-                    {yarn.brand}
-                  </h3>
-                  <div className="text-xs text-slate-500 line-clamp-1 mb-2">
-                    {yarn.color || yarn.name} {yarn.category ? `- ${yarn.category}` : ''} {yarn.material ? `(${yarn.material})` : ''}
-                  </div>
-                  
-                  {/* 桌機版隱藏的操作區 */}
-                  <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 hidden sm:flex transition-opacity bg-white/90 rounded-md shadow-sm border border-slate-100 overflow-hidden z-20">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); deleteYarn(yarn.id); }}
-                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* 快速數量調整 */}
-                  <div className="flex justify-between items-center mt-auto pt-2" onClick={(e) => e.stopPropagation()}>
-                    <button 
-                      onClick={() => adjustQuantity(yarn.id, yarn.quantity, -1)}
-                      disabled={yarn.quantity <= 0}
-                      className="text-slate-300 hover:text-purple-500 disabled:opacity-30 p-1 bg-slate-50 rounded-full"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => adjustQuantity(yarn.id, yarn.quantity, 1)}
-                      className="text-slate-300 hover:text-purple-500 p-1 bg-slate-50 rounded-full"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
-
-      {}
-      {!isChatOpen && !isFormOpen && (
-        <button
-          onClick={() => setIsChatOpen(true)}
-          className="fixed bottom-24 right-6 md:bottom-28 md:right-8 bg-white text-purple-600 p-3.5 rounded-full shadow-lg shadow-purple-200/50 transition-transform hover:scale-105 z-40 border border-purple-100 flex items-center justify-center"
-        >
-          <MessageCircle className="w-6 h-6" />
-        </button>
-      )}
-
-      {!isFormOpen && (
-        <button
-          onClick={openAddForm}
-          className="fixed bottom-6 right-6 md:bottom-8 md:right-8 bg-gradient-to-tr from-purple-500 to-fuchsia-400 hover:from-purple-600 hover:to-fuchsia-500 text-white p-4 rounded-full shadow-lg shadow-purple-300 transition-transform hover:scale-105 z-40 flex items-center justify-center border-2 border-white"
-        >
-          <Plus className="w-6 h-6 stroke-[2.5]" />
-        </button>
-      )}
-
-      {}
-      {isChatOpen && (
-        <div className="fixed inset-y-0 right-0 w-full sm:w-[400px] bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300 sm:rounded-l-3xl border-l border-purple-100">
-          {/* Header */}
-          <div className="px-5 py-4 border-b border-purple-100 bg-gradient-to-r from-purple-50 to-fuchsia-50 flex justify-between items-center shrink-0 sm:rounded-tl-3xl">
-            <div className="flex items-center gap-3">
-              <div className="bg-purple-200 p-2 rounded-xl text-purple-700 shadow-sm">
-                <Bot className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-800 text-sm">AI 毛線顧問</h3>
-                <p className="text-xs text-slate-500">庫存查詢 · 靈感建議</p>
-              </div>
-            </div>
-            <button 
-              onClick={() => setIsChatOpen(false)}
-              className="p-2 text-slate-400 hover:text-slate-600 hover:bg-white/50 rounded-full transition-colors"
-            >
-              <Minimize2 className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
-            {chatMessages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div 
-                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                    msg.role === 'user' 
-                      ? 'bg-purple-500 text-white rounded-br-sm shadow-md shadow-purple-200/50' 
-                      : 'bg-white border border-purple-100 text-slate-700 rounded-bl-sm shadow-sm'
-                  }`}
-                  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-                >
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-            {isChatLoading && (
-              <div className="flex justify-start">
-                <div className="bg-white border border-purple-100 rounded-2xl rounded-bl-sm px-4 py-3 shadow-sm flex gap-1.5 items-center">
-                  <div className="w-2 h-2 bg-purple-300 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-purple-300 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
-                  <div className="w-2 h-2 bg-purple-300 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
-                </div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div className="p-4 bg-white border-t border-purple-100 shrink-0 sm:rounded-bl-3xl">
-            <form onSubmit={handleSendMessage} className="flex gap-2 relative">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="問問顧問你的庫存，或尋求靈感..."
-                className="flex-1 bg-slate-100 border-none rounded-full pl-4 pr-12 py-3 text-sm focus:ring-2 focus:ring-purple-400 outline-none text-slate-700 transition-shadow"
-                disabled={isChatLoading}
-              />
-              <button
-                type="submit"
-                disabled={!chatInput.trim() || isChatLoading}
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-purple-500 hover:bg-purple-600 disabled:bg-slate-300 text-white p-2 rounded-full transition-colors flex shrink-0 items-center justify-center"
-              >
-                <Send className="w-4 h-4 ml-0.5" />
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 transition-opacity">
-          <div className="bg-white w-full max-w-md h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col animate-in slide-in-from-bottom-4 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-200">
-            <div className="flex items-center justify-between p-4 border-b border-slate-100 shrink-0">
-              <h2 className="text-lg font-bold text-slate-700">
-                {editingId ? '編輯物品' : '新增物品'}
-              </h2>
-              <div className="flex gap-2">
-                {editingId && (
-                  <button 
-                    type="button"
-                    onClick={() => { deleteYarn(editingId); setIsFormOpen(false); }}
-                    className="p-2 text-red-400 hover:bg-red-50 rounded-full transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-                <button 
-                  onClick={() => setIsFormOpen(false)}
-                  className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            
-            <div className="overflow-y-auto flex-1 p-5">
-              <form id="yarn-form" onSubmit={saveYarn} className="space-y-5">
-                
-                {/* 圖片上傳區塊 */}
-                <div className="flex justify-center">
-                  <div 
-                    onClick={() => imageInputRef.current?.click()}
-                    className="w-32 h-32 rounded-2xl border-2 border-dashed border-purple-200 bg-purple-50 flex flex-col items-center justify-center cursor-pointer hover:border-purple-400 hover:bg-purple-100 transition-colors overflow-hidden relative group"
-                  >
-                    {formData.imageUrl ? (
-                      <>
-                        <img src={formData.imageUrl} alt="預覽" className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Camera className="w-6 h-6 text-white" />
+    <!-- 頂部導覽列 -->
+    <header class="bg-white sticky top-0 z-10 shadow-sm border-b border-purple-100">
+        <div class="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
+            <div class="flex flex-col sm:flex-row justify-between gap-4 sm:items-center">
+                <div class="flex items-center gap-4 flex-1">
+                    <h1 class="text-xl font-bold text-slate-800 whitespace-nowrap hidden sm:block">
+                        我的毛線
+                    </h1>
+                    <div class="relative flex-1 max-w-md">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i data-lucide="search" class="w-4 h-4 text-purple-300"></i>
                         </div>
-                      </>
-                    ) : (
-                      <>
-                        <Camera className="w-8 h-8 text-purple-300 mb-2" />
-                        <span className="text-xs text-purple-500 font-medium">上傳照片</span>
-                      </>
-                    )}
-                  </div>
+                        <input
+                            type="text"
+                            id="searchInput"
+                            placeholder="搜尋顏色、品項、品牌、材質..."
+                            oninput="renderApp()"
+                            class="block w-full pl-10 pr-3 py-2 border-none rounded-full bg-purple-50 text-slate-700 placeholder-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-300 sm:text-sm transition-shadow"
+                        />
+                    </div>
                 </div>
-
-                {/* 品牌與顏色 */}
-                <div className="grid grid-cols-2 gap-4">
-                  <AutocompleteInput 
-                    label="品牌" 
-                    name="brand" 
-                    value={formData.brand} 
-                    options={existingBrands} 
-                    onChange={handleInputChange} 
-                    placeholder="如：小萌仔" 
-                  />
-                  <AutocompleteInput 
-                    label="顏色" 
-                    name="color" 
-                    value={formData.color} 
-                    options={existingColors} 
-                    onChange={handleInputChange} 
-                    placeholder="如：35海棠色" 
-                  />
-                </div>
-
-                {/* 品項與材質 */}
-                <div className="grid grid-cols-2 gap-4">
-                  <AutocompleteInput 
-                    label="品項" 
-                    name="category" 
-                    value={formData.category} 
-                    options={existingCategories} 
-                    onChange={handleInputChange} 
-                    placeholder="如：冰條線" 
-                  />
-                  <AutocompleteInput 
-                    label="材質" 
-                    name="material" 
-                    value={formData.material} 
-                    options={existingMaterials} 
-                    onChange={handleInputChange} 
-                    placeholder="如：純棉" 
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-500">數量</label>
-                    <input 
-                      type="number" name="quantity" value={formData.quantity} onChange={handleInputChange} min="0"
-                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm transition-all font-bold"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-slate-500">單價</label>
-                    <input 
-                      type="number" name="price" value={formData.price} onChange={handleInputChange} min="0" step="0.01"
-                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm transition-all font-bold"
-                    />
-                  </div>
-                </div>
-
-                {/* 動態自訂欄位 */}
-                <div className="pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-xs font-bold text-slate-500">更多自訂資訊</label>
-                    <button type="button" onClick={addCustomField} className="text-xs text-purple-600 font-medium flex items-center gap-1 hover:text-purple-700">
-                      <PlusCircle className="w-3.5 h-3.5" /> 新增欄位
+                
+                <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+                    <div id="statsContainer" class="flex gap-4 text-xs font-medium text-slate-500 whitespace-nowrap bg-white px-3 py-1.5 rounded-full border border-purple-100 shadow-sm">
+                        <span>共 <strong id="statItems" class="text-purple-600">0</strong> 件</span>
+                        <div class="w-px bg-purple-100"></div>
+                        <span>價值 <strong id="statValue" class="text-purple-600">¥0</strong></span>
+                    </div>
+                    
+                    <button
+                        onclick="document.getElementById('csvFileInput').click()"
+                        class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-100 hover:bg-purple-200 rounded-full transition-colors whitespace-nowrap"
+                    >
+                        <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+                        <span>匯入 Excel (CSV)</span>
                     </button>
-                  </div>
-                  
-                  {formData.customFields.length === 0 && (
-                    <p className="text-xs text-slate-400 italic">點擊右上方新增想記錄的屬性 (如: 適合針號, 產地)</p>
-                  )}
-                  
-                  <div className="space-y-2">
-                    {formData.customFields.map((field, index) => (
-                      <div key={index} className="flex gap-2 items-center">
-                        <input 
-                          type="text" value={field.key} onChange={(e) => updateCustomField(index, 'key', e.target.value)} placeholder="屬性名 (如:重量)"
-                          className="w-1/3 px-2 py-2 rounded-lg bg-slate-50 border-none focus:ring-1 focus:ring-purple-400 outline-none text-xs"
-                        />
-                        <input 
-                          type="text" value={field.value} onChange={(e) => updateCustomField(index, 'value', e.target.value)} placeholder="內容 (如:50g)"
-                          className="flex-1 px-2 py-2 rounded-lg bg-slate-50 border-none focus:ring-1 focus:ring-purple-400 outline-none text-xs"
-                        />
-                        <button type="button" onClick={() => removeCustomField(index)} className="p-1 text-slate-300 hover:text-red-400">
-                          <Minus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
                 </div>
-
-              </form>
             </div>
             
-            <div className="p-4 border-t border-slate-100 shrink-0">
-              <button 
-                form="yarn-form"
-                type="submit"
-                className="w-full py-3.5 rounded-xl font-bold text-white bg-gradient-to-r from-purple-500 to-fuchsia-500 hover:from-purple-600 hover:to-fuchsia-600 transition-all shadow-md shadow-purple-200/50 active:scale-[0.98]"
-              >
-                確認儲存
-              </button>
+            <!-- 大項分類快速篩選列 -->
+            <div id="categoryFilterBar" class="mt-3 flex overflow-x-auto gap-2 pb-1 hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+                <!-- 動態生成篩選標籤 -->
             </div>
-          </div>
         </div>
-      )}
+    </header>
+
+    <!-- 主要內容區 -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div id="yarnGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+            <!-- 動態生成毛線卡片 -->
+        </div>
+    </main>
+
+    <!-- 浮動新增按鈕 -->
+    <button
+        onclick="openAddForm()"
+        class="fixed bottom-6 right-6 md:bottom-8 md:right-8 bg-gradient-to-tr from-purple-500 to-fuchsia-400 hover:from-purple-600 hover:to-fuchsia-500 text-white p-4 rounded-full shadow-lg shadow-purple-300 transition-transform hover:scale-105 z-40 flex items-center justify-center border-2 border-white"
+    >
+        <i data-lucide="plus" class="w-6 h-6"></i>
+    </button>
+
+    <!-- 新增/編輯 Modal 表單 -->
+    <div id="yarnModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden items-end sm:items-center justify-center z-50 p-0 sm:p-4 transition-opacity">
+        <div class="bg-white w-full max-w-md h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col">
+            <div class="flex items-center justify-between p-4 border-b border-slate-100 shrink-0">
+                <h2 id="modalTitle" class="text-lg font-bold text-slate-700">新增物品</h2>
+                <div class="flex gap-2">
+                    <button 
+                        id="deleteModalBtn"
+                        type="button"
+                        onclick="deleteCurrentYarn()"
+                        class="p-2 text-red-400 hover:bg-red-50 rounded-full transition-colors hidden"
+                    >
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                    <button 
+                        onclick="closeForm()"
+                        class="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors"
+                    >
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-y-auto flex-1 p-5">
+                <form id="yarnForm" onsubmit="saveYarn(event)" class="space-y-5">
+                    <!-- 圖片預覽與上傳區塊 (1:1 正方形裁切) -->
+                    <div class="flex justify-center">
+                        <div 
+                            onclick="document.getElementById('imageFileInput').click()"
+                            class="w-32 h-32 rounded-2xl border-2 border-dashed border-purple-200 bg-purple-50 flex flex-col items-center justify-center cursor-pointer hover:border-purple-400 hover:bg-purple-100 transition-colors overflow-hidden relative group"
+                        >
+                            <img id="formImagePreview" src="" alt="" class="w-full h-full object-cover hidden" />
+                            <div id="formImagePlaceholder" class="flex flex-col items-center justify-center text-purple-300">
+                                <i data-lucide="camera" class="w-8 h-8 mb-2"></i>
+                                <span class="text-xs text-purple-500 font-medium">上傳照片</span>
+                            </div>
+                            <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <i data-lucide="camera" class="w-6 h-6 text-white"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 品牌與顏色 -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1.5 relative">
+                            <label class="text-xs font-bold text-slate-500">品牌</label>
+                            <input type="text" id="formBrand" list="brandOptions" placeholder="如：小萌仔" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm" />
+                            <datalist id="brandOptions"></datalist>
+                        </div>
+                        <div class="space-y-1.5 relative">
+                            <label class="text-xs font-bold text-slate-500">顏色</label>
+                            <input type="text" id="formColor" list="colorOptions" placeholder="如：35海棠色" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm" />
+                            <datalist id="colorOptions"></datalist>
+                        </div>
+                    </div>
+
+                    <!-- 品項與材質 -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1.5 relative">
+                            <label class="text-xs font-bold text-slate-500">品項</label>
+                            <input type="text" id="formCategory" list="categoryOptions" placeholder="如：冰條線" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm" />
+                            <datalist id="categoryOptions"></datalist>
+                        </div>
+                        <div class="space-y-1.5 relative">
+                            <label class="text-xs font-bold text-slate-500">材質</label>
+                            <input type="text" id="formMaterial" list="materialOptions" placeholder="如：純棉" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm" />
+                            <datalist id="materialOptions"></datalist>
+                        </div>
+                    </div>
+
+                    <!-- 數量與單價 -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1.5">
+                            <label class="text-xs font-bold text-slate-500">數量</label>
+                            <input type="number" id="formQuantity" value="1" min="0" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm font-bold" />
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-xs font-bold text-slate-500">單價</label>
+                            <input type="number" id="formPrice" value="0" min="0" step="0.01" class="w-full px-3 py-2.5 rounded-xl bg-slate-50 border-none focus:ring-2 focus:ring-purple-400 outline-none text-sm font-bold" />
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <div class="p-4 border-t border-slate-100 shrink-0">
+                <button 
+                    type="submit"
+                    onclick="saveYarn(event)"
+                    class="w-full py-3.5 rounded-xl font-bold text-white bg-gradient-to-r from-purple-500 to-fuchsia-500 hover:from-purple-600 hover:to-fuchsia-600 transition-all shadow-md shadow-purple-200/50"
+                >
+                    確認儲存
+                </button>
+            </div>
+        </div>
     </div>
-  );
-}
+
+    <!-- Firebase SDK 引入與主程式邏輯 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 設定固定的公開雲端同步 App ID（讓所有裝置只要連進這個網頁就能共用同一個倉庫）
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        
+        // 若沒有 Canvas 環境，可改填您的 Firebase 設定物件
+        let app, db, auth;
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+        } catch(e) {
+            console.error("Firebase Init Error:", e);
+        }
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'shared-yarn-warehouse-app';
+
+        let yarns = [];
+        let activeFilter = '全部';
+        let editingId = null;
+        let currentImageBase64 = '';
+
+        window.onload = async () => {
+            if (auth) {
+                try {
+                    await signInAnonymously(auth);
+                } catch(err) {
+                    console.error("Auth failed", err);
+                }
+            }
+            initFirestoreListener();
+        };
+
+        function initFirestoreListener() {
+            if (!db) return;
+            // 雲端資料路徑
+            const yarnsRef = collection(db, 'artifacts', appId, 'public', 'data', 'yarns');
+            onSnapshot(yarnsRef, (snapshot) => {
+                yarns = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                yarns.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                renderApp();
+            }, (error) => {
+                console.error("Firestore sync error:", error);
+            });
+        }
+
+        // 渲染整個 APP 畫面
+        window.renderApp = function() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            
+            // 1. 計算大項分類
+            const categoriesSet = new Set(yarns.map(y => y.category?.trim() || '未分類'));
+            const categories = ['全部', ...Array.from(categoriesSet)];
+            
+            const filterBar = document.getElementById('categoryFilterBar');
+            filterBar.innerHTML = categories.map(cat => `
+                <button
+                    onclick="setActiveFilter('${cat}')"
+                    class="px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+                        activeFilter === cat
+                            ? 'bg-gradient-to-r from-purple-500 to-purple-400 text-white shadow-md shadow-purple-200'
+                            : 'bg-white text-slate-500 hover:bg-purple-50 border border-purple-100'
+                    }"
+                >
+                    ${cat}
+                </button>
+            `).join('');
+
+            // 2. 更新自動完成清單 (Datalist)
+            updateDatalists();
+
+            // 3. 過濾毛線資料
+            const filtered = yarns.filter(yarn => {
+                const matchSearch = (yarn.color || '') .toLowerCase().includes(searchTerm) || 
+                    (yarn.brand || '').toLowerCase().includes(searchTerm) ||
+                    (yarn.category || '').toLowerCase().includes(searchTerm) ||
+                    (yarn.material || '').toLowerCase().includes(searchTerm);
+                
+                const itemCat = yarn.category?.trim() || '未分類';
+                const matchFilter = activeFilter === '全部' || itemCat === activeFilter;
+                return matchSearch && matchFilter;
+            });
+
+            // 4. 計算總數與總價
+            const stats = yarns.reduce((acc, y) => ({
+                totalItems: acc.totalItems + Number(y.quantity || 0),
+                totalValue: acc.totalValue + (Number(y.quantity || 0) * Number(y.price || 0))
+            }), { totalItems: 0, totalValue: 0 });
+
+            document.getElementById('statItems').innerText = stats.totalItems;
+            document.getElementById('statValue').innerText = '¥' + stats.totalValue.toLocaleString();
+
+            // 5. 渲染毛線網格卡片
+            const grid = document.getElementById('yarnGrid');
+            if (filtered.length === 0) {
+                grid.innerHTML = `
+                    <div class="col-span-full text-center py-20">
+                        <i data-lucide="package" class="w-16 h-16 text-purple-200 mx-auto mb-4"></i>
+                        <h2 class="text-xl font-medium text-slate-600 mb-2">倉庫空空的</h2>
+                        <p class="text-sm text-slate-400">點擊右下角新增，或使用 Excel 批次匯入資料。</p>
+                    </div>
+                `;
+            } else {
+                grid.innerHTML = filtered.map(yarn => `
+                    <div onclick="openEditForm('${yarn.id}')" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-purple-50 hover:shadow-md transition-all group flex flex-col relative cursor-pointer">
+                        <!-- 圖片區塊 (固定 1:1 正方形) -->
+                        <div class="aspect-square bg-slate-50 relative">
+                            ${yarn.imageUrl ? `
+                                <img src="${yarn.imageUrl}" alt="" class="w-full h-full object-cover" onerror="this.style.display='none'" />
+                            ` : `
+                                <div class="w-full h-full flex items-center justify-center text-purple-100 bg-purple-50/50">
+                                    <i data-lucide="image" class="w-10 h-10"></i>
+                                </div>
+                            `}
+                            
+                            <!-- 價格標籤 (左上角) -->
+                            <div class="absolute top-2 left-2 bg-[#a3c959] text-white text-[11px] font-bold px-1.5 py-0.5 rounded-sm shadow-sm">
+                                ${yarn.price}
+                            </div>
+
+                            <!-- 數量標籤 (右下角) -->
+                            <div class="absolute -bottom-2.5 right-2 z-10 bg-[#FFAB33] text-white text-xs font-bold px-2.5 py-0.5 rounded-l-full rounded-r-md shadow-sm border-2 border-white">
+                                ${yarn.quantity}
+                            </div>
+                        </div>
+
+                        <!-- 資訊文字區 -->
+                        <div class="p-3 pt-4 flex flex-col flex-1 bg-white relative">
+                            <h3 class="text-sm font-bold text-slate-800 leading-snug line-clamp-1 mb-1">
+                                ${yarn.brand || '未分類'}
+                            </h3>
+                            <div class="text-xs text-slate-500 line-clamp-1 mb-2">
+                                ${yarn.color || ''} ${yarn.category ? `- ${yarn.category}` : ''} ${yarn.material ? `(${yarn.material})` : ''}
+                            </div>
+                            
+                            <!-- 快速加減數量按鈕 -->
+                            <div class="flex justify-between items-center mt-auto pt-2" onclick="event.stopPropagation()">
+                                <button onclick="adjustQuantity('${yarn.id}', ${yarn.quantity}, -1)" ${yarn.quantity <= 0 ? 'disabled' : ''} class="text-slate-300 hover:text-purple-500 disabled:opacity-30 p-1 bg-slate-50 rounded-full">
+                                    <i data-lucide="minus" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="adjustQuantity('${yarn.id}', ${yarn.quantity}, 1)" class="text-slate-300 hover:text-purple-500 p-1 bg-slate-50 rounded-full">
+                                    <i data-lucide="plus" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            lucide.createIcons();
+        };
+
+        window.setActiveFilter = function(cat) {
+            activeFilter = cat;
+            renderApp();
+        };
+
+        function updateDatalists() {
+            const brands = Array.from(new Set(yarns.map(y => y.brand?.trim()).filter(Boolean)));
+            const colors = Array.from(new Set(yarns.map(y => y.color?.trim()).filter(Boolean)));
+            const categories = Array.from(new Set(yarns.map(y => y.category?.trim()).filter(Boolean)));
+            const materials = Array.from(new Set(yarns.map(y => y.material?.trim()).filter(Boolean)));
+
+            document.getElementById('brandOptions').innerHTML = brands.map(b => `<option value="${b}">`).join('');
+            document.getElementById('colorOptions').innerHTML = colors.map(c => `<option value="${c}">`).join('');
+            document.getElementById('categoryOptions').innerHTML = categories.map(cat => `<option value="${cat}">`).join('');
+            document.getElementById('materialOptions').innerHTML = materials.map(m => `<option value="${m}">`).join('');
+        }
+
+        // 圖片 1:1 裁切與壓縮處理
+        window.handleImageUpload = function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.src = e.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_SIZE = 400;
+                    let size = Math.min(img.width, img.height);
+                    let sx = (img.width - size) / 2;
+                    let sy = (img.height - size) / 2;
+                    canvas.width = MAX_SIZE;
+                    canvas.height = MAX_SIZE;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, sx, sy, size, size, 0, 0, MAX_SIZE, MAX_SIZE);
+                    currentImageBase64 = canvas.toDataURL('image/jpeg', 0.7);
+                    
+                    document.getElementById('formImagePreview').src = currentImageBase64;
+                    document.getElementById('formImagePreview').classList.remove('hidden');
+                    document.getElementById('formImagePlaceholder').classList.add('hidden');
+                };
+            };
+            reader.readAsDataURL(file);
+            event.target.value = '';
+        };
+
+        window.openAddForm = function() {
+            editingId = null;
+            currentImageBase64 = '';
+            document.getElementById('modalTitle').innerText = '新增物品';
+            document.getElementById('deleteModalBtn').classList.add('hidden');
+            document.getElementById('formBrand').value = '';
+            document.getElementById('formColor').value = '';
+            document.getElementById('formCategory').value = '';
+            document.getElementById('formMaterial').value = '';
+            document.getElementById('formQuantity').value = 1;
+            document.getElementById('formPrice').value = 0;
+            document.getElementById('formImagePreview').src = '';
+            document.getElementById('formImagePreview').classList.add('hidden');
+            document.getElementById('formImagePlaceholder').classList.remove('hidden');
+            document.getElementById('yarnModal').classList.remove('hidden');
+            document.getElementById('yarnModal').classList.add('flex');
+        };
+
+        window.openEditForm = function(id) {
+            const yarn = yarns.find(y => y.id === id);
+            if (!yarn) return;
+            editingId = id;
+            currentImageBase64 = yarn.imageUrl || '';
+            document.getElementById('modalTitle').innerText = '編輯物品';
+            document.getElementById('deleteModalBtn').classList.remove('hidden');
+            document.getElementById('formBrand').value = yarn.brand || '';
+            document.getElementById('formColor').value = yarn.color || '';
+            document.getElementById('formCategory').value = yarn.category || '';
+            document.getElementById('formMaterial').value = yarn.material || '';
+            document.getElementById('formQuantity').value = yarn.quantity || 0;
+            document.getElementById('formPrice').value = yarn.price || 0;
+
+            if (currentImageBase64) {
+                document.getElementById('formImagePreview').src = currentImageBase64;
+                document.getElementById('formImagePreview').classList.remove('hidden');
+                document.getElementById('formImagePlaceholder').classList.add('hidden');
+            } else {
+                document.getElementById('formImagePreview').src = '';
+                document.getElementById('formImagePreview').classList.add('hidden');
+                document.getElementById('formImagePlaceholder').classList.remove('hidden');
+            }
+
+            document.getElementById('yarnModal').classList.remove('hidden');
+            document.getElementById('yarnModal').classList.add('flex');
+        };
+
+        window.closeForm = function() {
+            document.getElementById('yarnModal').classList.add('hidden');
+            document.getElementById('yarnModal').classList.remove('flex');
+        };
+
+        window.saveYarn = async function(e) {
+            e.preventDefault();
+            if (!db) return;
+
+            const yarnData = {
+                brand: document.getElementById('formBrand').value.trim() || '未分類',
+                color: document.getElementById('formColor').value.trim() || '未命名',
+                category: document.getElementById('formCategory').value.trim(),
+                material: document.getElementById('formMaterial').value.trim(),
+                quantity: Math.max(0, Number(document.getElementById('formQuantity').value)),
+                price: Math.max(0, Number(document.getElementById('formPrice').value)),
+                imageUrl: currentImageBase64,
+                updatedAt: Date.now()
+            };
+
+            try {
+                const yarnsRef = collection(db, 'artifacts', appId, 'public', 'data', 'yarns');
+                if (editingId) {
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'yarns', editingId);
+                    await updateDoc(docRef, yarnData);
+                } else {
+                    await addDoc(yarnsRef, { ...yarnData, createdAt: Date.now() });
+                }
+                closeForm();
+            } catch (err) {
+                console.error("Save error:", err);
+            }
+        };
+
+        window.adjustQuantity = async function(id, currentQty, change) {
+            if (!db) return;
+            const newQty = Math.max(0, Number(currentQty) + change);
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'yarns', id);
+                await updateDoc(docRef, { quantity: newQty, updatedAt: Date.now() });
+            } catch (err) {
+                console.error("Adjust error:", err);
+            }
+        };
+
+        window.deleteCurrentYarn = async function() {
+            if (!editingId || !db) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'yarns', editingId);
+                await deleteDoc(docRef);
+                closeForm();
+            } catch (err) {
+                console.error("Delete error:", err);
+            }
+        };
+
+        // 批次匯入 CSV
+        window.handleCSVUpload = async function(e) {
+            const file = e.target.files[0];
+            if (!file || !db) return;
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const text = event.target.result;
+                    const lines = text.split('\n');
+                    if (lines.length <= 1) return;
+
+                    const batch = writeBatch(db);
+                    let count = 0;
+                    for (let i = 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        const cols = line.split(',').map(c => c.replace(/^"(.*)"$/, '$1').trim());
+                        if (cols.length >= 2) {
+                            const yarnData = {
+                                brand: cols[0] || '未分類',
+                                color: cols[1] || '未命名',
+                                category: cols[2] || '',
+                                material: cols[3] || '',
+                                quantity: Number(cols[4]) || 0,
+                                price: Number(cols[5]) || 0,
+                                imageUrl: cols[6] || '',
+                                createdAt: Date.now(),
+                                updatedAt: Date.now()
+                            };
+                            const newDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'yarns'));
+                            batch.set(newDocRef, yarnData);
+                            count++;
+                        }
+                    }
+                    if (count > 0) {
+                        await batch.commit();
+                        alert(`成功匯入 ${count} 筆資料！`);
+                    }
+                } catch(err) {
+                    console.error("CSV Import error", err);
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        };
+    </script>
+</body>
+</html>
