@@ -40,19 +40,27 @@
                     </div>
                 </div>
                 
-                <div class="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-                    <div id="statsContainer" class="flex gap-4 text-xs font-medium text-slate-500 whitespace-nowrap bg-white px-3 py-1.5 rounded-full border border-purple-100 shadow-sm">
+                <div class="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+                    <div id="statsContainer" class="flex gap-3 text-xs font-medium text-slate-500 whitespace-nowrap bg-white px-3 py-1.5 rounded-full border border-purple-100 shadow-sm">
                         <span>共 <strong id="statItems" class="text-purple-600">0</strong> 件</span>
                         <div class="w-px bg-purple-100"></div>
                         <span>價值 <strong id="statValue" class="text-purple-600">¥0</strong></span>
                     </div>
                     
                     <button
+                        onclick="openTemplateModal()"
+                        class="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-full transition-colors whitespace-nowrap border border-purple-200"
+                    >
+                        <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
+                        <span>匯入範本</span>
+                    </button>
+
+                    <button
                         onclick="document.getElementById('csvFileInput').click()"
-                        class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-100 hover:bg-purple-200 rounded-full transition-colors whitespace-nowrap"
+                        class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-full transition-colors whitespace-nowrap shadow-sm"
                     >
                         <i data-lucide="upload" class="w-3.5 h-3.5"></i>
-                        <span>匯入 Excel (CSV)</span>
+                        <span>匯入 Excel</span>
                     </button>
                 </div>
             </div>
@@ -64,9 +72,9 @@
         </div>
     </header>
 
-    <!-- 主要內容區 -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div id="yarnGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+    <!-- 主要內容區 (一橫排呈現 4 個，間距縮小，格子更緊湊) -->
+    <main class="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-4">
+        <div id="yarnGrid" class="grid grid-cols-4 gap-2 sm:gap-3 md:gap-4">
             <!-- 動態生成毛線卡片 -->
         </div>
     </main>
@@ -79,7 +87,61 @@
         <i data-lucide="plus" class="w-6 h-6"></i>
     </button>
 
-    <!-- 新增/編輯 Modal 表單 -->
+    <!-- Excel 匯入範本說明 Modal -->
+    <div id="templateModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden items-center justify-center z-50 p-4 transition-opacity">
+        <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div class="flex items-center justify-between p-4 border-b border-slate-100 bg-purple-50">
+                <h2 class="text-base font-bold text-slate-700 flex items-center gap-2">
+                    <i data-lucide="file-spreadsheet" class="w-5 h-5 text-purple-600"></i>
+                    Excel / CSV 批次匯入範本說明
+                </h2>
+                <button onclick="closeTemplateModal()" class="p-1.5 text-slate-400 hover:bg-white rounded-full transition-colors">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            
+            <div class="p-5 space-y-4 text-xs sm:text-sm text-slate-600">
+                <p>請將您的 Excel 檔案另存為 <strong class="text-purple-600">CSV (逗號分隔)</strong> 格式。檔案第一行為標題欄位，資料順序如下：</p>
+                
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono text-xs overflow-x-auto">
+                    品牌,顏色,品項,材質,數量,單價,圖片網址<br>
+                    小萌仔,35海棠色,冰條線,純棉,5,12.5,<br>
+                    娃娃家,12天空藍,牛奶棉,混紡,2,10,
+                </div>
+
+                <div class="space-y-2">
+                    <p class="font-bold text-slate-700">欄位對照說明：</p>
+                    <ul class="list-disc pl-5 space-y-1 text-slate-500">
+                        <li><strong>品牌</strong>：例如 小萌仔、雪妃爾等</li>
+                        <li><strong>顏色</strong>：例如 35海棠色、02純白</li>
+                        <li><strong>品項</strong>：例如 冰條線、四股牛奶棉</li>
+                        <li><strong>材質</strong>：例如 純棉、羊毛、壓克力纖維</li>
+                        <li><strong>數量</strong>：庫存數量（數字）</li>
+                        <li><strong>單價</strong>：單價金額（數字）</li>
+                        <li><strong>圖片網址</strong>：可留空或填入圖片線上網址</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-2">
+                <button 
+                    onclick="downloadTemplateCSV()"
+                    class="px-4 py-2.5 rounded-xl text-xs font-bold text-purple-700 bg-purple-100 hover:bg-purple-200 transition-colors flex items-center gap-1.5"
+                >
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    下載範本 CSV 檔
+                </button>
+                <button 
+                    onclick="closeTemplateModal()"
+                    class="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 transition-colors"
+                >
+                    我知道了
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增/編輯 Modal 表-單 -->
     <div id="yarnModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden items-end sm:items-center justify-center z-50 p-0 sm:p-4 transition-opacity">
         <div class="bg-white w-full max-w-md h-[90vh] sm:h-auto sm:max-h-[85vh] rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col">
             <div class="flex items-center justify-between p-4 border-b border-slate-100 shrink-0">
@@ -240,7 +302,7 @@
             filterBar.innerHTML = categories.map(cat => `
                 <button
                     onclick="setActiveFilter('${cat}')"
-                    class="px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+                    class="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
                         activeFilter === cat
                             ? 'bg-gradient-to-r from-purple-500 to-purple-400 text-white shadow-md shadow-purple-200'
                             : 'bg-white text-slate-500 hover:bg-purple-50 border border-purple-100'
@@ -274,7 +336,7 @@
             document.getElementById('statItems').innerText = stats.totalItems;
             document.getElementById('statValue').innerText = '¥' + stats.totalValue.toLocaleString();
 
-            // 5. 渲染毛線網格卡片
+            // 5. 渲染毛線網格卡片 (更加精緻緊湊，支援橫排 4 個)
             const grid = document.getElementById('yarnGrid');
             if (filtered.length === 0) {
                 grid.innerHTML = `
@@ -286,44 +348,44 @@
                 `;
             } else {
                 grid.innerHTML = filtered.map(yarn => `
-                    <div onclick="openEditForm('${yarn.id}')" class="bg-white rounded-2xl overflow-hidden shadow-sm border border-purple-50 hover:shadow-md transition-all group flex flex-col relative cursor-pointer">
+                    <div onclick="openEditForm('${yarn.id}')" class="bg-white rounded-xl overflow-hidden shadow-sm border border-purple-50 hover:shadow-md transition-all group flex flex-col relative cursor-pointer">
                         <!-- 圖片區塊 (固定 1:1 正方形) -->
                         <div class="aspect-square bg-slate-50 relative">
                             ${yarn.imageUrl ? `
                                 <img src="${yarn.imageUrl}" alt="" class="w-full h-full object-cover" onerror="this.style.display='none'" />
                             ` : `
                                 <div class="w-full h-full flex items-center justify-center text-purple-100 bg-purple-50/50">
-                                    <i data-lucide="image" class="w-10 h-10"></i>
+                                    <i data-lucide="image" class="w-8 h-8"></i>
                                 </div>
                             `}
                             
                             <!-- 價格標籤 (左上角) -->
-                            <div class="absolute top-2 left-2 bg-[#a3c959] text-white text-[11px] font-bold px-1.5 py-0.5 rounded-sm shadow-sm">
+                            <div class="absolute top-1 left-1 bg-[#a3c959] text-white text-[10px] font-bold px-1 py-0.5 rounded-sm shadow-sm">
                                 ${yarn.price}
                             </div>
 
                             <!-- 數量標籤 (右下角) -->
-                            <div class="absolute -bottom-2.5 right-2 z-10 bg-[#FFAB33] text-white text-xs font-bold px-2.5 py-0.5 rounded-l-full rounded-r-md shadow-sm border-2 border-white">
+                            <div class="absolute -bottom-2 right-1.5 z-10 bg-[#FFAB33] text-white text-[11px] font-bold px-2 py-0.5 rounded-l-full rounded-r-md shadow-sm border-2 border-white">
                                 ${yarn.quantity}
                             </div>
                         </div>
 
-                        <!-- 資訊文字區 -->
-                        <div class="p-3 pt-4 flex flex-col flex-1 bg-white relative">
-                            <h3 class="text-sm font-bold text-slate-800 leading-snug line-clamp-1 mb-1">
+                        <!-- 資訊文字區 (格子小一點，縮減字體與邊距) -->
+                        <div class="p-2 pt-3 flex flex-col flex-1 bg-white relative">
+                            <h3 class="text-xs font-bold text-slate-800 leading-snug line-clamp-1 mb-0.5">
                                 ${yarn.brand || '未分類'}
                             </h3>
-                            <div class="text-xs text-slate-500 line-clamp-1 mb-2">
-                                ${yarn.color || ''} ${yarn.category ? `- ${yarn.category}` : ''} ${yarn.material ? `(${yarn.material})` : ''}
+                            <div class="text-[11px] text-slate-500 line-clamp-1 mb-1.5">
+                                ${yarn.color || ''} ${yarn.category ? `- ${yarn.category}` : ''}
                             </div>
                             
                             <!-- 快速加減數量按鈕 -->
-                            <div class="flex justify-between items-center mt-auto pt-2" onclick="event.stopPropagation()">
-                                <button onclick="adjustQuantity('${yarn.id}', ${yarn.quantity}, -1)" ${yarn.quantity <= 0 ? 'disabled' : ''} class="text-slate-300 hover:text-purple-500 disabled:opacity-30 p-1 bg-slate-50 rounded-full">
-                                    <i data-lucide="minus" class="w-4 h-4"></i>
+                            <div class="flex justify-between items-center mt-auto pt-1" onclick="event.stopPropagation()">
+                                <button onclick="adjustQuantity('${yarn.id}', ${yarn.quantity}, -1)" ${yarn.quantity <= 0 ? 'disabled' : ''} class="text-slate-300 hover:text-purple-500 disabled:opacity-20 p-0.5 bg-slate-50 rounded-full">
+                                    <i data-lucide="minus" class="w-3 h-3"></i>
                                 </button>
-                                <button onclick="adjustQuantity('${yarn.id}', ${yarn.quantity}, 1)" class="text-slate-300 hover:text-purple-500 p-1 bg-slate-50 rounded-full">
-                                    <i data-lucide="plus" class="w-4 h-4"></i>
+                                <button onclick="adjustQuantity('${yarn.id}', ${yarn.quantity}, 1)" class="text-slate-300 hover:text-purple-500 p-0.5 bg-slate-50 rounded-full">
+                                    <i data-lucide="plus" class="w-3 h-3"></i>
                                 </button>
                             </div>
                         </div>
@@ -336,6 +398,29 @@
         window.setActiveFilter = function(cat) {
             activeFilter = cat;
             renderApp();
+        };
+
+        window.openTemplateModal = function() {
+            document.getElementById('templateModal').classList.remove('hidden');
+            document.getElementById('templateModal').classList.add('flex');
+            lucide.createIcons();
+        };
+
+        window.closeTemplateModal = function() {
+            document.getElementById('templateModal').classList.add('hidden');
+            document.getElementById('templateModal').classList.remove('flex');
+        };
+
+        window.downloadTemplateCSV = function() {
+            const csvContent = "\uFEFF品牌,顏色,品項,材質,數量,單價,圖片網址\n小萌仔,35海棠色,冰條線,純棉,5,12.5,\n娃娃家,12天空藍,牛奶棉,混紡,2,10,";
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.setAttribute('download', '毛線倉庫匯入範本.csv');
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         };
 
         function updateDatalists() {
