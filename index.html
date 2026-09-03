@@ -6,8 +6,6 @@
     <title>毛線倉庫</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
     <!-- React & ReactDOM (React 18) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -78,24 +76,6 @@
             if (isNaN(d.getTime())) return new Date().toISOString().split('T')[0];
             const pad = n => String(n).padStart(2, '0');
             return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        }
-
-        function Icon({ name, className }) {
-            const [svgString, setSvgString] = useState('');
-            useEffect(() => {
-                let isMounted = true;
-                const loadIcon = () => {
-                    if (window.lucide && window.lucide.icons && window.lucide.icons[name]) {
-                        if (isMounted) setSvgString(window.lucide.icons[name].toSvg({ class: className }));
-                    } else {
-                        setTimeout(loadIcon, 100);
-                    }
-                };
-                loadIcon();
-                return () => { isMounted = false; };
-            }, [name, className]);
-            if (!svgString) return <span className={`inline-block ${className}`}></span>;
-            return <span dangerouslySetInnerHTML={{ __html: svgString }} className="inline-flex items-center justify-center" />;
         }
 
         function AutocompleteInput({ label, name, value, options, onChange, placeholder, required }) {
@@ -349,12 +329,66 @@
                 setEditingHistory(prev => prev.filter(h => h.id !== histId));
             };
 
+            const downloadTemplateCSV = () => {
+                const csvContent = "\uFEFF品牌,顏色,品項,材質,數量,單價,建立日期(YYYY-MM-DD)\n雪球,11淺紫色,小萌仔,冰條線,1,12.5,2026-09-02\n";
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.setAttribute('download', '毛線倉庫匯入範本.csv');
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            };
+
+            const handleCSVUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const text = event.target.result;
+                        const lines = text.split('\n');
+                        if (lines.length <= 1) return;
+
+                        const baseTime = Date.now();
+                        const batch = isFirebaseActive && db ? db.batch() : null;
+                        let newItems = [...yarns];
+
+                        for (let i = 1; i < lines.length; i++) {
+                            const line = lines[i].trim();
+                            if (!line) continue;
+                            const cols = line.split(',').map(c => c.replace(/^"(.*)"$/, '$1').trim());
+                            if (cols.length >= 2) {
+                                const qty = Number(cols[4]) || 0;
+                                const createdAtVal = cols[6] ? new Date(cols[6]).getTime() : baseTime;
+                                const docId = `csv_${baseTime}_${i}`;
+                                const newItem = {
+                                    id: docId, brand: cols[0] || '', color: cols[1] || '', category: cols[2] || '',
+                                    material: cols[3] || '', quantity: qty, price: Number(cols[5]) || 0, imageUrl: '',
+                                    history: [{ id: `hist_${baseTime}_${i}`, action: `Excel 匯入 (數量: ${qty})`, time: cols[6] || toDateLocal(Date.now()), delta: qty }],
+                                    createdAt: isNaN(createdAtVal) ? baseTime : createdAtVal, updatedAt: Date.now()
+                                };
+                                if (batch) batch.set(db.collection('yarns').doc(docId), newItem);
+                                else newItems.push(newItem);
+                            }
+                        }
+                        if (batch) await batch.commit();
+                        else saveToStorage(newItems);
+                        alert("🎉 成功匯入 Excel 資料！");
+                    } catch(err) { alert("CSV 格式解析失敗"); }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+            };
+
             if (loading) {
                 return <div className="min-h-screen bg-[#FFFDF9] flex items-center justify-center"><div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin"></div></div>;
             }
 
             return (
                 <div className="min-h-screen bg-[#FFFDF9] text-[#5C5446] font-sans pb-24 md:pb-8 relative">
+                    <input type="file" id="csvFileInput" accept=".csv" className="hidden" onChange={handleCSVUpload} />
                     <input type="file" id="imageFileInput" accept="image/*" ref={imageInputRef} className="hidden" onChange={handleImageUpload} />
 
                     <header className="bg-[#FFFDF9] sticky top-0 z-30 shadow-sm border-b border-amber-100">
@@ -362,7 +396,7 @@
                             <div className="flex flex-col sm:flex-row justify-between gap-3 sm:items-center">
                                 <div className="relative flex-1 max-w-full sm:max-w-md">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <Icon name="search" className="w-4 h-4 text-amber-300" />
+                                        <span className="text-amber-300 text-sm">🔍</span>
                                     </div>
                                     <input
                                         type="text" placeholder="搜尋顏色、品項、品牌..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
@@ -375,6 +409,14 @@
                                         <div className="w-px bg-amber-200"></div>
                                         <span>價值 <strong className="text-amber-900">¥{stats.totalValue.toLocaleString()}</strong></span>
                                     </div>
+                                    
+                                    <button onClick={downloadTemplateCSV} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-amber-800 bg-[#FDF8ED] hover:bg-amber-100/60 rounded-full transition-colors whitespace-nowrap border border-amber-200">
+                                        <span>匯入範本</span>
+                                    </button>
+
+                                    <button onClick={() => document.getElementById('csvFileInput').click()} className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#FFB017] hover:bg-amber-500 rounded-full transition-colors whitespace-nowrap shadow-md shadow-amber-200">
+                                        <span>匯入 Excel</span>
+                                    </button>
                                 </div>
                             </div>
                             
@@ -396,7 +438,7 @@
                     <main className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 py-4">
                         {filteredYarns.length === 0 ? (
                             <div className="text-center py-20">
-                                <Icon name="package" className="w-16 h-16 text-amber-800/10 mx-auto mb-4" />
+                                <div className="text-5xl mx-auto mb-4 opacity-40">📦</div>
                                 <h2 className="text-lg font-bold text-amber-900 mb-1">倉庫空空的</h2>
                             </div>
                         ) : (
@@ -412,7 +454,7 @@
                                                     <img src={yarn.imageUrl} alt="" className="w-full h-full object-cover" />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center text-amber-200 bg-amber-50">
-                                                        <Icon name="image" className="w-6 h-6" />
+                                                        <span className="text-[10px] font-bold opacity-70">無圖片</span>
                                                     </div>
                                                 )}
                                                 <div className="absolute bottom-1 right-1 z-10 bg-[#FFB017] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white min-w-[18px] text-center leading-none">
@@ -441,9 +483,9 @@
 
                     <button
                         onClick={openAddForm}
-                        className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#FFB017] hover:bg-amber-500 text-white p-4 md:p-5 rounded-full shadow-[0_8px_20px_rgba(255,176,23,0.5)] transition-transform hover:scale-105 active:scale-95 z-40 flex items-center justify-center border-[3px] border-white"
+                        className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#FFB017] hover:bg-amber-500 text-white w-14 h-14 md:w-16 md:h-16 rounded-full shadow-[0_8px_20px_rgba(255,176,23,0.5)] transition-transform hover:scale-105 active:scale-95 z-40 flex items-center justify-center border-[3px] border-white"
                     >
-                        <Icon name="plus" className="w-7 h-7 md:w-8 md:h-8 stroke-[3]" />
+                        <span className="text-3xl font-bold pb-1">＋</span>
                     </button>
 
                     {isFormOpen && (
@@ -454,19 +496,19 @@
                                     <h2 className="text-base font-bold text-amber-900">
                                         {editingId ? '編輯物品與紀錄' : '新增物品'}
                                     </h2>
-                                    <div className="flex gap-1.5">
+                                    <div className="flex items-center gap-2">
                                         {editingId && (
                                             <>
-                                                <button type="button" onClick={duplicateCurrentYarn} className="p-2 text-[#84a95c] hover:bg-green-50 rounded-full transition-colors" title="複製此毛線 (保留品牌/品項/材質)">
-                                                    <Icon name="copy" className="w-5 h-5" />
+                                                <button type="button" onClick={duplicateCurrentYarn} className="px-3 py-1.5 bg-[#E8F3E8] text-[#558B55] hover:bg-[#D4E8D4] text-xs font-bold rounded-full transition-colors">
+                                                    複製
                                                 </button>
-                                                <button type="button" onClick={deleteCurrentYarn} className="p-2 text-[#E78F8E] hover:bg-red-50 rounded-full transition-colors">
-                                                    <Icon name="trash-2" className="w-5 h-5" />
+                                                <button type="button" onClick={deleteCurrentYarn} className="px-3 py-1.5 bg-[#FEEAEA] text-[#D86060] hover:bg-[#FAD4D4] text-xs font-bold rounded-full transition-colors">
+                                                    刪除
                                                 </button>
                                             </>
                                         )}
-                                        <button onClick={() => setIsFormOpen(false)} className="p-2 text-[#FFB017] hover:bg-amber-100 rounded-full transition-colors">
-                                            <Icon name="x" className="w-6 h-6" />
+                                        <button onClick={() => setIsFormOpen(false)} className="w-8 h-8 flex items-center justify-center text-[#FFB017] hover:bg-amber-100 rounded-full transition-colors">
+                                            <span className="text-lg font-bold">✕</span>
                                         </button>
                                     </div>
                                 </div>
@@ -476,7 +518,10 @@
                                         <div onClick={() => imageInputRef.current?.click()} className="w-32 h-32 rounded-[32px] border-2 border-dashed border-[#FFD98E] bg-[#FFF8E7] flex flex-col items-center justify-center cursor-pointer hover:border-[#FFB017] transition-colors overflow-hidden relative shadow-sm p-1">
                                             <div className="w-full h-full rounded-[26px] overflow-hidden relative flex flex-col items-center justify-center">
                                                 {currentImageBase64 ? <img src={currentImageBase64} alt="" className="w-full h-full object-cover" /> : (
-                                                    <div className="flex flex-col items-center justify-center"><Icon name="camera" className="w-8 h-8 mb-2 text-[#FFB017]" /><span className="text-xs text-[#E59815] font-bold">上傳照片</span></div>
+                                                    <div className="flex flex-col items-center justify-center">
+                                                        <span className="text-3xl mb-1">📷</span>
+                                                        <span className="text-xs text-[#E59815] font-bold">上傳照片</span>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -485,7 +530,6 @@
                                     <form className="space-y-4">
                                         <div className="grid grid-cols-2 gap-4">
                                             <AutocompleteInput label="品牌" name="brand" value={formData.brand} options={existingBrands} onChange={handleInputChange} placeholder="請輸入品牌" />
-                                            {/* 已將顏色改為純文字輸入框 */}
                                             <div className="space-y-1.5">
                                                 <label className="text-xs font-bold text-amber-900/70">顏色</label>
                                                 <input type="text" name="color" value={formData.color || ''} onChange={handleInputChange} placeholder="請輸入顏色" className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-sm text-amber-900 font-medium transition-all" />
@@ -547,7 +591,9 @@
                                                                         </div>
                                                                         {item.note && <p className="text-[11px] text-amber-800/80 font-medium">{item.note}</p>}
                                                                     </div>
-                                                                    <button type="button" onClick={() => deleteHistoryRecord(item.id)} className="text-[#E78F8E] hover:text-red-500 p-2"><Icon name="x" className="w-4 h-4" /></button>
+                                                                    <button type="button" onClick={() => deleteHistoryRecord(item.id)} className="w-6 h-6 flex justify-center items-center text-[#E78F8E] hover:bg-red-50 rounded-full">
+                                                                        <span className="text-sm font-bold">✕</span>
+                                                                    </button>
                                                                 </div>
                                                             ))}
                                                         </div>
