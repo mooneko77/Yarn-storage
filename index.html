@@ -44,16 +44,15 @@
 
         // ==========================================
         // ⚠️ Firebase 資料庫連線設定 (GitHub 部署專用)
-        // 如果你要上傳到 GitHub 並希望跨裝置同步，請將你的 Firebase 設定填入這裡。
-        // 如果留空，系統會自動變成「單機版」(僅存在當下設備)。
         // ==========================================
         const MY_FIREBASE_CONFIG = {
-            // apiKey: "YOUR_API_KEY",
-            // authDomain: "YOUR_AUTH_DOMAIN",
-            // projectId: "YOUR_PROJECT_ID",
-            // storageBucket: "YOUR_STORAGE_BUCKET",
-            // messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            // appId: "YOUR_APP_ID"
+            apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
+            authDomain: "yarn-storage.firebaseapp.com",
+            projectId: "yarn-storage",
+            storageBucket: "yarn-storage.firebasestorage.app",
+            messagingSenderId: "355907288134",
+            appId: "1:355907288134:web:8aa9c0bcef363137415e47",
+            measurementId: "G-SJ2D0096Y3"
         };
 
         const platformFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
