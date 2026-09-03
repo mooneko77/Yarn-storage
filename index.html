@@ -2,610 +2,694 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
+    <!-- 確保在手機上完美滿版，並支援加到主畫面 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>毛線倉庫</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>毛線倉庫 - 心水收納版</title>
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React & ReactDOM (React 18) -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <!-- Babel for JSX -->
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Firebase SDK (v9/v10 compat) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        theme: {
+                            50: '#FFFAF3',
+                            100: '#FFF2E0',
+                            200: '#FFE4C4',
+                            300: '#FFD399',
+                            400: '#FFB84D',
+                            500: '#F59E0B',
+                            600: '#D97706',
+                            800: '#92400E',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         body {
-            background-color: #FFFDF9;
-            color: #5C5446;
-            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #F8F9FA;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
             -webkit-tap-highlight-color: transparent;
         }
-        @keyframes scaleIn {
-            from { transform: scale(0.95); opacity: 0; }
-            to { transform: scale(1); opacity: 1; }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
         }
-        .animate-scale-in { animation: scaleIn 0.2s ease-out forwards; }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .cute-shadow {
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
+        }
+        .cute-modal-shadow {
+            box-shadow: 0 10px 30px rgba(146, 64, 14, 0.1);
+        }
+        
+        /* 自訂可愛的捲軸 */
+        .cute-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .cute-scroll::-webkit-scrollbar-track {
+            background: #FFFFAF3;
+            border-radius: 10px;
+        }
+        .cute-scroll::-webkit-scrollbar-thumb {
+            background: #FFE4C4;
+            border-radius: 10px;
+        }
     </style>
 </head>
-<body class="pb-24 md:pb-8 selection:bg-amber-200">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
-
         // ==========================================
-        // Firebase 連線設定
+        // 1. Firebase 專屬金鑰設定區 (請勿更動)
         // ==========================================
         const MY_FIREBASE_CONFIG = {
-            apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
+            apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTCkycM5KQ",
             authDomain: "yarn-storage.firebaseapp.com",
             projectId: "yarn-storage",
             storageBucket: "yarn-storage.firebasestorage.app",
             messagingSenderId: "355907288134",
-            appId: "1:355907288134:web:8aa9c0bcef363137415e47",
-            measurementId: "G-SJ2D0096Y3"
+            appId: "1:355907288134:web:8aa9c0bcef363137415e47"
         };
 
-        const platformFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const firebaseConfig = Object.keys(platformFirebaseConfig).length > 0 ? platformFirebaseConfig : MY_FIREBASE_CONFIG;
+        const LOCAL_STORAGE_KEY = 'cute_yarn_storage_data';
 
         let db = null;
         let auth = null;
-        let isFirebaseActive = false;
+        let useFirebase = false;
 
-        if (Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey) {
-            try {
-                if (!firebase.apps.length) {
-                    firebase.initializeApp(firebaseConfig);
+        try {
+            firebase.initializeApp(MY_FIREBASE_CONFIG);
+            db = firebase.firestore();
+            auth = firebase.auth();
+            useFirebase = true;
+            console.log("Firebase 初始化成功！");
+        } catch (error) {
+            console.warn("Firebase 初始化失敗，將使用本地儲存模式 (單機版)。", error);
+            useFirebase = false;
+        }
+
+        // ==========================================
+        // 2. 自訂安全的 Icon 元件 (防當機)
+        // ==========================================
+        const Icon = ({ name, className = "", size = 24 }) => {
+            const iconRef = React.useRef(null);
+            
+            React.useEffect(() => {
+                if (iconRef.current && window.lucide) {
+                    iconRef.current.innerHTML = ''; // 清空
+                    const iconElement = window.lucide.createElement(window.lucide.icons[name]);
+                    if (iconElement) {
+                        iconElement.setAttribute('width', size);
+                        iconElement.setAttribute('height', size);
+                        iconElement.setAttribute('class', className);
+                        iconRef.current.appendChild(iconElement);
+                    }
                 }
-                auth = firebase.auth();
-                db = firebase.firestore();
-                isFirebaseActive = true;
-            } catch (e) {
-                console.warn("Firebase 初始化失敗", e);
-            }
-        }
+            }, [name, className, size]);
 
-        function toDateLocal(timestamp) {
-            const d = new Date(timestamp || Date.now());
-            if (isNaN(d.getTime())) return new Date().toISOString().split('T')[0];
-            const pad = n => String(n).padStart(2, '0');
-            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-        }
+            return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
+        };
 
-        function AutocompleteInput({ label, name, value, options, onChange, placeholder, required }) {
-            const [isOpen, setIsOpen] = useState(false);
-            const inputRef = useRef(null);
+        // ==========================================
+        // 3. 主程式元件
+        // ==========================================
+        function App() {
+            const [yarns, setYarns] = React.useState([]);
+            const [searchTerm, setSearchTerm] = React.useState('');
+            const [selectedCategory, setSelectedCategory] = React.useState('全部');
+            const [isModalOpen, setIsModalOpen] = React.useState(false);
+            const [isImportModalOpen, setIsImportModalOpen] = React.useState(false);
+            const [currentYarn, setCurrentYarn] = React.useState(null);
+            
+            // 表單狀態
+            const [formData, setFormData] = React.useState({
+                id: '',
+                brand: '',
+                color: '',
+                item: '',
+                material: '',
+                quantity: 1,
+                price: 0,
+                imageUrl: '',
+                createdAt: new Date().toISOString().split('T')[0],
+                history: []
+            });
 
-            const filteredOptions = useMemo(() => {
-                return (options || []).filter(opt =>
-                    opt && opt.toLowerCase().includes((value || '').toLowerCase()) && opt !== value
-                );
-            }, [options, value]);
+            // 庫存管理狀態
+            const [inventoryTab, setInventoryTab] = React.useState('入庫'); // '入庫' 或 '出庫'
+            const [inventoryChange, setInventoryChange] = React.useState(1);
+            const [inventoryDate, setInventoryDate] = React.useState(new Date().toISOString().split('T')[0]);
+            const [inventoryNote, setInventoryNote] = React.useState('');
+
+            // ==========================================
+            // 資料載入與同步邏輯
+            // ==========================================
+            React.useEffect(() => {
+                let unsubscribe = null;
+
+                const loadData = async () => {
+                    if (useFirebase && auth) {
+                        auth.onAuthStateChanged(user => {
+                            if (user) {
+                                console.log("Firebase 匿名登入成功，開始同步資料...");
+                                unsubscribe = db.collection('yarns').onSnapshot(snapshot => {
+                                    const data = snapshot.docs.map(doc => ({
+                                        id: doc.id,
+                                        ...doc.data()
+                                    }));
+                                    setYarns(data);
+                                }, error => {
+                                    console.error("讀取資料失敗，請確認 Firestore 規則是否開放！", error);
+                                    fallbackToLocal();
+                                });
+                            } else {
+                                auth.signInAnonymously().catch(error => {
+                                    console.error("匿名登入失敗：", error);
+                                    fallbackToLocal();
+                                });
+                            }
+                        });
+                    } else {
+                        fallbackToLocal();
+                    }
+                };
+
+                loadData();
+                return () => { if (unsubscribe) unsubscribe(); };
+            }, []);
+
+            const fallbackToLocal = () => {
+                const localData = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (localData) setYarns(JSON.parse(localData));
+            };
+
+            const saveToLocal = (newYarns) => {
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newYarns));
+            };
+
+            // ==========================================
+            // 分類與統計
+            // ==========================================
+            const categories = ['全部', ...new Set(yarns.map(y => y.material || '未分類'))];
+            
+            const filteredYarns = yarns.filter(yarn => {
+                const matchSearch = (yarn.brand || '').includes(searchTerm) || 
+                                  (yarn.color || '').includes(searchTerm) ||
+                                  (yarn.item || '').includes(searchTerm) ||
+                                  (yarn.material || '').includes(searchTerm);
+                const matchCategory = selectedCategory === '全部' || (yarn.material || '未分類') === selectedCategory;
+                return matchSearch && matchCategory;
+            });
+
+            const totalItems = yarns.reduce((sum, y) => sum + (Number(y.quantity) || 0), 0);
+            const totalValue = yarns.reduce((sum, y) => sum + ((Number(y.quantity) || 0) * (Number(y.price) || 0)), 0);
+
+            // ==========================================
+            // 開啟 / 關閉 彈窗
+            // ==========================================
+            const openModal = (yarn = null) => {
+                if (yarn) {
+                    setFormData(yarn);
+                    setCurrentYarn(yarn);
+                } else {
+                    const newYarn = {
+                        id: Date.now().toString(),
+                        brand: '',
+                        color: '',
+                        item: '',
+                        material: '',
+                        quantity: 1,
+                        price: 0,
+                        imageUrl: '',
+                        createdAt: new Date().toISOString().split('T')[0],
+                        history: []
+                    };
+                    setFormData(newYarn);
+                    setCurrentYarn(null);
+                }
+                
+                // 重置庫存管理表單
+                setInventoryTab('入庫');
+                setInventoryChange(1);
+                setInventoryDate(new Date().toISOString().split('T')[0]);
+                setInventoryNote('');
+                
+                setIsModalOpen(true);
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        setFormData({ ...formData, imageUrl: reader.result });
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            // ==========================================
+            // 儲存商品
+            // ==========================================
+            const saveYarn = async () => {
+                if (useFirebase && auth && auth.currentUser) {
+                    try {
+                        await db.collection('yarns').doc(formData.id).set(formData);
+                    } catch (error) {
+                        console.error("Firebase 儲存失敗", error);
+                        alert("雲端儲存失敗，請檢查權限設定！將自動存為單機版。");
+                        saveLocalFallback();
+                    }
+                } else {
+                    saveLocalFallback();
+                }
+                setIsModalOpen(false);
+            };
+
+            const saveLocalFallback = () => {
+                let newYarns;
+                if (currentYarn) {
+                    newYarns = yarns.map(y => y.id === formData.id ? formData : y);
+                } else {
+                    newYarns = [formData, ...yarns];
+                }
+                setYarns(newYarns);
+                saveToLocal(newYarns);
+            };
+
+            const deleteYarn = async () => {
+                if (!confirm('確定要刪除這個毛線嗎？')) return;
+                
+                if (useFirebase && auth && auth.currentUser) {
+                    try {
+                        await db.collection('yarns').doc(formData.id).delete();
+                    } catch (error) {
+                        console.error("刪除失敗", error);
+                    }
+                } else {
+                    const newYarns = yarns.filter(y => y.id !== formData.id);
+                    setYarns(newYarns);
+                    saveToLocal(newYarns);
+                }
+                setIsModalOpen(false);
+            };
+
+            // ==========================================
+            // 新增庫存異動紀錄
+            // ==========================================
+            const addHistoryRecord = () => {
+                if (inventoryChange <= 0) {
+                    alert('請輸入大於 0 的數量！');
+                    return;
+                }
+
+                const changeAmount = inventoryTab === '入庫' ? inventoryChange : -inventoryChange;
+                const newQuantity = Math.max(0, Number(formData.quantity) + changeAmount);
+                
+                const newRecord = {
+                    id: Date.now().toString(),
+                    date: inventoryDate,
+                    type: inventoryTab, // '入庫' 或 '出庫'
+                    amount: changeAmount,
+                    note: inventoryNote || (inventoryTab === '入庫' ? '補貨入庫' : '使用出庫')
+                };
+
+                setFormData({
+                    ...formData,
+                    quantity: newQuantity,
+                    history: [newRecord, ...(formData.history || [])].sort((a, b) => new Date(b.date) - new Date(a.date))
+                });
+
+                // 重置庫存表單
+                setInventoryChange(1);
+                setInventoryNote('');
+            };
+
+            // ==========================================
+            // 匯入 Excel (CSV)
+            // ==========================================
+            const downloadTemplate = () => {
+                const headers = ['品牌', '顏色', '品項', '材質', '數量', '單價', '建立日期(YYYY-MM-DD)', '圖片網址(選填)'];
+                const csvContent = "\uFEFF" + headers.join(',') + '\n' + '雪球,07天藍,小可愛,冰條線,5,30,2024-01-01,';
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "毛線倉庫匯入範本.csv");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    const text = event.target.result;
+                    const rows = text.split('\n').filter(row => row.trim() !== '');
+                    const newItems = [];
+                    const today = new Date().toISOString().split('T')[0];
+
+                    for (let i = 1; i < rows.length; i++) {
+                        const cols = rows[i].split(',').map(col => col.trim());
+                        if (cols.length >= 6) {
+                            const qty = parseInt(cols[4]) || 0;
+                            const createdDate = cols[6] || today;
+                            const item = {
+                                id: Date.now().toString() + i,
+                                brand: cols[0],
+                                color: cols[1],
+                                item: cols[2],
+                                material: cols[3],
+                                quantity: qty,
+                                price: parseFloat(cols[5]) || 0,
+                                createdAt: createdDate,
+                                imageUrl: cols[7] || '',
+                                history: [{
+                                    id: Date.now().toString() + 'h' + i,
+                                    date: createdDate,
+                                    type: '入庫',
+                                    amount: qty,
+                                    note: '透過 Excel 批次匯入初始庫存'
+                                }]
+                            };
+                            newItems.push(item);
+                            
+                            if (useFirebase && auth && auth.currentUser) {
+                                await db.collection('yarns').doc(item.id).set(item);
+                            }
+                        }
+                    }
+
+                    if (!useFirebase) {
+                        const merged = [...newItems, ...yarns];
+                        setYarns(merged);
+                        saveToLocal(merged);
+                    }
+                    alert(`成功匯入 ${newItems.length} 筆資料！`);
+                    setIsImportModalOpen(false);
+                };
+                reader.readAsText(file);
+            };
 
             return (
-                <div className="space-y-1.5 relative">
-                    <label className="text-xs font-bold text-amber-900/70">
-                        {label} {required && <span className="text-rose-400">*</span>}
-                    </label>
-                    <div className="relative">
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            name={name}
-                            value={value || ''}
-                            onChange={(e) => { onChange(e); setIsOpen(true); }}
-                            onFocus={() => setIsOpen(true)}
-                            onBlur={() => setTimeout(() => setIsOpen(false), 200)}
-                            placeholder={placeholder}
-                            required={required}
-                            className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-sm text-amber-900 font-medium transition-all"
-                        />
+                <div className="min-h-screen pb-24 max-w-4xl mx-auto md:p-6 p-4">
+                    
+                    {/* Header 區塊 */}
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                        <h1 className="text-2xl font-extrabold text-[#7A4B3A] tracking-wide">毛線倉庫</h1>
+                        
+                        <div className="w-full md:w-auto flex-1 max-w-md bg-white rounded-full flex items-center px-4 py-2.5 cute-shadow border border-theme-100">
+                            <Icon name="search" className="text-theme-400 mr-2" size="20" />
+                            <input
+                                type="text"
+                                placeholder="搜尋顏色、品項、品牌、材質..."
+                                className="w-full outline-none text-theme-800 placeholder-theme-300 text-sm bg-transparent"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
                     </div>
-                    {isOpen && filteredOptions.length > 0 && (
-                        <div className="absolute z-50 w-full mt-1 bg-white border border-amber-100 rounded-2xl shadow-lg max-h-48 overflow-y-auto py-1 hide-scrollbar">
-                            {filteredOptions.map(opt => (
-                                <div
-                                    key={opt}
-                                    onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        onChange({ target: { name, value: opt } });
-                                        setIsOpen(false);
-                                        inputRef.current?.blur();
-                                    }}
-                                    className="px-4 py-2 text-sm text-amber-900 hover:bg-amber-50 cursor-pointer transition-colors font-bold"
-                                >
-                                    {opt}
+
+                    {/* 統計與動作列 */}
+                    <div className="flex flex-wrap items-center gap-3 mb-6">
+                        <div className="bg-white px-4 py-2 rounded-2xl flex items-center gap-3 text-sm font-medium cute-shadow border border-theme-100 text-[#9C6644]">
+                            <span>共 {totalItems} 件</span>
+                            <div className="w-[1px] h-4 bg-theme-200"></div>
+                            <span>價值 ¥{totalValue}</span>
+                        </div>
+                        
+                        <button onClick={downloadTemplate} className="bg-white text-theme-500 px-4 py-2 rounded-2xl text-sm font-bold border border-theme-200 hover:bg-theme-50 transition cute-shadow">
+                            匯入範本
+                        </button>
+                        <button onClick={() => setIsImportModalOpen(true)} className="bg-theme-400 text-white px-4 py-2 rounded-2xl text-sm font-bold hover:bg-theme-500 transition cute-shadow">
+                            匯入 Excel
+                        </button>
+                    </div>
+
+                    {/* 材質分類標籤 (水平滑動) */}
+                    <div className="flex overflow-x-auto hide-scrollbar gap-3 mb-6 pb-2">
+                        {categories.map(category => (
+                            <button
+                                key={category}
+                                onClick={() => setSelectedCategory(category)}
+                                className={`whitespace-nowrap px-5 py-2 rounded-full text-sm font-bold transition-all duration-300 ${
+                                    selectedCategory === category
+                                        ? 'bg-theme-400 text-white cute-shadow transform scale-105'
+                                        : 'bg-white text-theme-600 border border-theme-100 hover:bg-theme-50'
+                                }`}
+                            >
+                                {category}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* 商品網格 - 手機改2欄，平板以上4欄 */}
+                    {filteredYarns.length === 0 ? (
+                        <div className="text-center py-20 bg-white rounded-[32px] cute-shadow border border-theme-100">
+                            <Icon name="package-open" size="48" className="mx-auto text-theme-200 mb-4" />
+                            <p className="text-[#9C6644] font-medium text-lg">倉庫空空的</p>
+                            <p className="text-theme-400 text-sm mt-2">點擊右下角新增，或使用 Excel 批次匯入資料。</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {filteredYarns.map(yarn => (
+                                <div key={yarn.id} 
+                                     onClick={() => openModal(yarn)}
+                                     className="bg-white rounded-[24px] p-3 flex flex-col items-center cute-shadow border border-theme-50 cursor-pointer hover:shadow-lg transition-shadow">
+                                    
+                                    {/* 圖片區塊：修正iOS Safari的歪斜問題 */}
+                                    <div className="w-full aspect-square bg-[#FFF8E7] rounded-[16px] overflow-hidden relative border border-theme-100">
+                                        {/* 單價標籤 */}
+                                        <div className="absolute top-2 left-2 bg-[#95C076] text-white text-xs font-bold px-2 py-1 rounded-full z-10 border-2 border-white shadow-sm">
+                                            ¥{yarn.price}
+                                        </div>
+                                        
+                                        {/* 圖片 */}
+                                        {yarn.imageUrl ? (
+                                            <img src={yarn.imageUrl} alt={yarn.color} className="absolute inset-0 w-full h-full object-cover object-center" />
+                                        ) : (
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <Icon name="image" size="32" className="text-theme-200" />
+                                            </div>
+                                        )}
+
+                                        {/* 總數量標籤 */}
+                                        <div className="absolute bottom-2 right-2 bg-theme-400 text-white text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full z-10 border-2 border-white shadow-sm">
+                                            {yarn.quantity}
+                                        </div>
+                                    </div>
+
+                                    {/* 資訊區塊 (顏色在上，品牌與品項在下並排) */}
+                                    <div className="mt-3 text-left w-full px-1">
+                                        <h3 className="text-[17px] font-extrabold text-[#7A4B3A] mb-1.5 truncate">{yarn.color || '未命名顏色'}</h3>
+                                        <div className="flex items-center flex-wrap gap-1.5">
+                                            <span className="text-sm text-[#9C6644] font-medium">{yarn.brand || '未命名品牌'}</span>
+                                            <span className="px-2 py-0.5 bg-[#FFF2E0] text-[#B87A5D] text-[11px] rounded-full truncate max-w-[90px]">{yarn.item || '未分類'}</span>
+                                        </div>
+                                    </div>
                                 </div>
                             ))}
                         </div>
                     )}
-                </div>
-            );
-        }
 
-        function App() {
-            const [yarns, setYarns] = useState([]);
-            const [loading, setLoading] = useState(true);
-            const [searchTerm, setSearchTerm] = useState('');
-            const [activeFilter, setActiveFilter] = useState('全部');
-            
-            const [isFormOpen, setIsFormOpen] = useState(false);
-            const [editingId, setEditingId] = useState(null);
-            const [currentImageBase64, setCurrentImageBase64] = useState('');
-            const [currentEditingHistory, setEditingHistory] = useState([]);
-            
-            const [stockModalMode, setStockModalMode] = useState('in');
-            const [stockDelta, setStockDelta] = useState(1);
-            const [stockDate, setStockDate] = useState(toDateLocal(Date.now()));
-            const [stockNote, setStockNote] = useState('');
-
-            const [formData, setFormData] = useState({
-                brand: '', color: '', category: '', material: '', quantity: 1, price: 0, createdAtInput: toDateLocal(Date.now())
-            });
-
-            const imageInputRef = useRef(null);
-
-            useEffect(() => {
-                if (isFirebaseActive && auth) {
-                    auth.signInAnonymously().catch(err => console.warn("匿名登入失敗", err));
-                    const unsubscribe = db.collection('yarns').onSnapshot((snapshot) => {
-                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-                        setYarns(data);
-                        setLoading(false);
-                    }, () => fallbackLocalStorage());
-                    return () => unsubscribe();
-                } else {
-                    fallbackLocalStorage();
-                }
-            }, []);
-
-            function fallbackLocalStorage() {
-                try {
-                    const localData = JSON.parse(localStorage.getItem('yarn_warehouse_data') || '[]');
-                    setYarns(localData);
-                } catch(e) { setYarns([]); }
-                setLoading(false);
-            }
-
-            function saveToStorage(newYarns) {
-                setYarns(newYarns);
-                try { localStorage.setItem('yarn_warehouse_data', JSON.stringify(newYarns)); } catch(e) {}
-            }
-
-            const filterTabs = useMemo(() => ['全部', ...Array.from(new Set(yarns.map(y => y.material?.trim()).filter(Boolean)))], [yarns]);
-            const existingBrands = useMemo(() => Array.from(new Set(yarns.map(y => y.brand?.trim()).filter(Boolean))), [yarns]);
-            const existingCategories = useMemo(() => Array.from(new Set(yarns.map(y => y.category?.trim()).filter(Boolean))), [yarns]);
-            const existingMaterials = useMemo(() => Array.from(new Set(yarns.map(y => y.material?.trim()).filter(Boolean))), [yarns]);
-
-            const filteredYarns = useMemo(() => yarns.filter(yarn => {
-                const matchSearch = (yarn.color || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-                    (yarn.brand || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    (yarn.category || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    (yarn.material || '').toLowerCase().includes(searchTerm.toLowerCase());
-                const matchFilter = activeFilter === '全部' || yarn.material?.trim() === activeFilter;
-                return matchSearch && matchFilter;
-            }), [yarns, searchTerm, activeFilter]);
-
-            const stats = useMemo(() => yarns.reduce((acc, y) => ({
-                totalItems: acc.totalItems + Number(y.quantity || 0),
-                totalValue: acc.totalValue + (Number(y.quantity || 0) * Number(y.price || 0))
-            }), { totalItems: 0, totalValue: 0 }), [yarns]);
-
-            const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
-
-            const handleImageUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.src = event.target.result;
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX_SIZE = 300;
-                        let size = Math.min(img.width, img.height);
-                        let sx = (img.width - size) / 2, sy = (img.height - size) / 2;
-                        canvas.width = MAX_SIZE; canvas.height = MAX_SIZE;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, sx, sy, size, size, 0, 0, MAX_SIZE, MAX_SIZE);
-                        setCurrentImageBase64(canvas.toDataURL('image/jpeg', 0.6));
-                    };
-                };
-                reader.readAsDataURL(file);
-                if (imageInputRef.current) imageInputRef.current.value = '';
-            };
-
-            const openAddForm = () => {
-                setEditingId(null);
-                setCurrentImageBase64('');
-                setEditingHistory([]);
-                setStockModalMode('in'); setStockDelta(1); setStockDate(toDateLocal(Date.now())); setStockNote('');
-                setFormData({ brand: '', color: '', category: '', material: '', quantity: 1, price: 0, createdAtInput: toDateLocal(Date.now()) });
-                setIsFormOpen(true);
-            };
-
-            const openEditForm = (yarn) => {
-                setEditingId(yarn.id);
-                setCurrentImageBase64(yarn.imageUrl || '');
-                setEditingHistory((yarn.history || []).map((h, idx) => ({ ...h, id: h.id || `hist_${Date.now()}_${idx}`, delta: Number(h.delta) || 0 })));
-                setStockModalMode('in'); setStockDelta(1); setStockNote(''); setStockDate(toDateLocal(Date.now()));
-                setFormData({
-                    brand: yarn.brand || '', color: yarn.color || '', category: yarn.category || '',
-                    material: yarn.material || '', quantity: Number(yarn.quantity) || 0, price: Number(yarn.price) || 0,
-                    createdAtInput: toDateLocal(yarn.createdAt || Date.now())
-                });
-                setIsFormOpen(true);
-            };
-
-            const duplicateCurrentYarn = () => {
-                setEditingId(null); 
-                setCurrentImageBase64('');
-                setEditingHistory([]);
-                setFormData(prev => ({
-                    ...prev,
-                    color: '', 
-                    quantity: 1,
-                    createdAtInput: toDateLocal(Date.now())
-                }));
-                setStockModalMode('in');
-                setStockDelta(1);
-                setStockNote('');
-            };
-
-            const saveYarn = async (e) => {
-                if (e) e.preventDefault();
-                try {
-                    const newQty = Math.max(0, Number(formData.quantity) || 0);
-                    const newPrice = Math.max(0, Number(formData.price) || 0);
-                    let createdAtVal = Date.now();
-                    if (formData.createdAtInput) {
-                        const parsed = new Date(formData.createdAtInput).getTime();
-                        if (!isNaN(parsed)) createdAtVal = parsed;
-                    }
-                    let history = [...currentEditingHistory];
-                    if (!editingId && history.length === 0) {
-                        history.unshift({
-                            id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                            action: `建立商品 (數量: ${newQty})`,
-                            time: formData.createdAtInput || toDateLocal(Date.now()),
-                            delta: newQty
-                        });
-                    }
-                    const docId = editingId || 'yarn_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-                    const yarnData = {
-                        id: docId, brand: (formData.brand || '').trim(), color: (formData.color || '').trim(),
-                        category: (formData.category || '').trim(), material: (formData.material || '').trim(),
-                        quantity: newQty, price: newPrice, imageUrl: currentImageBase64 || '', history: history,
-                        createdAt: createdAtVal, updatedAt: Date.now()
-                    };
-
-                    if (isFirebaseActive && db) await db.collection('yarns').doc(docId).set(yarnData);
-                    else saveToStorage(editingId ? yarns.map(y => y.id === editingId ? yarnData : y) : [yarnData, ...yarns]);
-                    setIsFormOpen(false);
-                } catch (err) { alert("儲存失敗：" + (err.message || "請檢查格式")); }
-            };
-
-            const deleteCurrentYarn = async () => {
-                if (!editingId) return;
-                if (!confirm("確定要刪除這筆資料嗎？")) return;
-                try {
-                    if (isFirebaseActive && db) await db.collection('yarns').doc(editingId).delete();
-                    else saveToStorage(yarns.filter(y => y.id !== editingId));
-                    setIsFormOpen(false);
-                } catch (err) { alert("刪除失敗：" + err.message); }
-            };
-
-            const handleStockTransaction = () => {
-                const delta = Number(stockDelta) || 0;
-                if (delta <= 0) return;
-                const isOut = stockModalMode === 'out';
-                const currentQty = Number(formData.quantity) || 0;
-                const newQty = isOut ? Math.max(0, currentQty - delta) : currentQty + delta;
-                const actualDelta = newQty - currentQty;
-                
-                setFormData(prev => ({ ...prev, quantity: newQty }));
-                setEditingHistory(prev => [{
-                    id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                    action: isOut ? `出庫 (${actualDelta})` : `入庫 (+${actualDelta})`,
-                    note: (stockNote || '').trim(),
-                    time: stockDate || toDateLocal(Date.now()),
-                    delta: actualDelta
-                }, ...prev]);
-                setStockNote(''); setStockDelta(1);
-            };
-
-            const deleteHistoryRecord = (histId) => {
-                const recordToDelete = currentEditingHistory.find(h => h.id === histId);
-                if (recordToDelete && recordToDelete.delta) {
-                    setFormData(prev => ({ ...prev, quantity: Math.max(0, Number(formData.quantity) - recordToDelete.delta) }));
-                }
-                setEditingHistory(prev => prev.filter(h => h.id !== histId));
-            };
-
-            const downloadTemplateCSV = () => {
-                const csvContent = "\uFEFF品牌,顏色,品項,材質,數量,單價,建立日期(YYYY-MM-DD)\n雪球,11淺紫色,小萌仔,冰條線,1,12.5,2026-09-02\n";
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.setAttribute('download', '毛線倉庫匯入範本.csv');
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            };
-
-            const handleCSVUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = async (event) => {
-                    try {
-                        const text = event.target.result;
-                        const lines = text.split('\n');
-                        if (lines.length <= 1) return;
-
-                        const baseTime = Date.now();
-                        const batch = isFirebaseActive && db ? db.batch() : null;
-                        let newItems = [...yarns];
-
-                        for (let i = 1; i < lines.length; i++) {
-                            const line = lines[i].trim();
-                            if (!line) continue;
-                            const cols = line.split(',').map(c => c.replace(/^"(.*)"$/, '$1').trim());
-                            if (cols.length >= 2) {
-                                const qty = Number(cols[4]) || 0;
-                                const createdAtVal = cols[6] ? new Date(cols[6]).getTime() : baseTime;
-                                const docId = `csv_${baseTime}_${i}`;
-                                const newItem = {
-                                    id: docId, brand: cols[0] || '', color: cols[1] || '', category: cols[2] || '',
-                                    material: cols[3] || '', quantity: qty, price: Number(cols[5]) || 0, imageUrl: '',
-                                    history: [{ id: `hist_${baseTime}_${i}`, action: `Excel 匯入 (數量: ${qty})`, time: cols[6] || toDateLocal(Date.now()), delta: qty }],
-                                    createdAt: isNaN(createdAtVal) ? baseTime : createdAtVal, updatedAt: Date.now()
-                                };
-                                if (batch) batch.set(db.collection('yarns').doc(docId), newItem);
-                                else newItems.push(newItem);
-                            }
-                        }
-                        if (batch) await batch.commit();
-                        else saveToStorage(newItems);
-                        alert("🎉 成功匯入 Excel 資料！");
-                    } catch(err) { alert("CSV 格式解析失敗"); }
-                };
-                reader.readAsText(file);
-                e.target.value = '';
-            };
-
-            if (loading) {
-                return <div className="min-h-screen bg-[#FFFDF9] flex items-center justify-center"><div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin"></div></div>;
-            }
-
-            return (
-                <div className="min-h-screen bg-[#FFFDF9] text-[#5C5446] font-sans pb-24 md:pb-8 relative">
-                    <input type="file" id="csvFileInput" accept=".csv" className="hidden" onChange={handleCSVUpload} />
-                    <input type="file" id="imageFileInput" accept="image/*" ref={imageInputRef} className="hidden" onChange={handleImageUpload} />
-
-                    <header className="bg-[#FFFDF9] sticky top-0 z-30 shadow-sm border-b border-amber-100">
-                        <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
-                            <div className="flex flex-col sm:flex-row justify-between gap-3 sm:items-center">
-                                <div className="relative flex-1 max-w-full sm:max-w-md">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <span className="text-amber-300 text-sm">🔍</span>
-                                    </div>
-                                    <input
-                                        type="text" placeholder="搜尋顏色、品項、品牌..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="block w-full pl-9 pr-3 py-2 border-none rounded-full bg-amber-50/70 text-amber-900 placeholder-amber-300 focus:ring-2 focus:ring-amber-300 text-sm transition-shadow outline-none"
-                                    />
-                                </div>
-                                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto overflow-x-auto hide-scrollbar">
-                                    <div className="flex gap-2 text-[11px] sm:text-xs font-medium text-amber-800 whitespace-nowrap bg-[#FDF8ED] px-3 py-1.5 rounded-full border border-amber-200/60 shadow-sm">
-                                        <span>共 <strong className="text-amber-900">{stats.totalItems}</strong> 件</span>
-                                        <div className="w-px bg-amber-200"></div>
-                                        <span>價值 <strong className="text-amber-900">¥{stats.totalValue.toLocaleString()}</strong></span>
-                                    </div>
-                                    
-                                    <button onClick={downloadTemplateCSV} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-amber-800 bg-[#FDF8ED] hover:bg-amber-100/60 rounded-full transition-colors whitespace-nowrap border border-amber-200">
-                                        <span>匯入範本</span>
-                                    </button>
-
-                                    <button onClick={() => document.getElementById('csvFileInput').click()} className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#FFB017] hover:bg-amber-500 rounded-full transition-colors whitespace-nowrap shadow-md shadow-amber-200">
-                                        <span>匯入 Excel</span>
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div className="mt-2.5 flex overflow-x-auto gap-2 pb-1 hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
-                                {filterTabs.map(tab => (
-                                    <button
-                                        key={tab} onClick={() => setActiveFilter(tab)}
-                                        className={`px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold whitespace-nowrap transition-all ${
-                                            activeFilter === tab ? 'bg-[#FFB017] text-white shadow-md shadow-amber-200' : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200/70'
-                                        }`}
-                                    >
-                                        {tab}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    </header>
-
-                    <main className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 py-4">
-                        {filteredYarns.length === 0 ? (
-                            <div className="text-center py-20">
-                                <div className="text-5xl mx-auto mb-4 opacity-40">📦</div>
-                                <h2 className="text-lg font-bold text-amber-900 mb-1">倉庫空空的</h2>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 sm:gap-3">
-                                {filteredYarns.map(yarn => (
-                                    <div 
-                                        key={yarn.id} onClick={() => openEditForm(yarn)} 
-                                        className="bg-white rounded-[14px] sm:rounded-2xl overflow-hidden shadow-sm border border-amber-100 hover:shadow-md hover:border-amber-200 transition-all group flex flex-col relative cursor-pointer active:scale-95"
-                                    >
-                                        <div className="aspect-square bg-[#FDF8ED] relative p-1">
-                                            <div className="w-full h-full rounded-[10px] overflow-hidden relative">
-                                                {yarn.imageUrl ? (
-                                                    <img src={yarn.imageUrl} alt="" className="w-full h-full object-cover" />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center text-amber-200 bg-amber-50">
-                                                        <span className="text-[10px] font-bold opacity-70">無圖片</span>
-                                                    </div>
-                                                )}
-                                                <div className="absolute bottom-1 right-1 z-10 bg-[#FFB017] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white min-w-[18px] text-center leading-none">
-                                                    {yarn.quantity}
-                                                </div>
-                                            </div>
-                                            <div className="absolute top-1.5 left-1.5 bg-[#84a95c] text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white leading-none">
-                                                ¥{yarn.price}
-                                            </div>
-                                        </div>
-
-                                        <div className="p-2 flex flex-col flex-1 bg-white justify-between">
-                                            <h3 className="text-[10px] sm:text-xs font-extrabold text-[#7A4016] leading-tight line-clamp-1 mb-1">
-                                                {yarn.color || '未命名'}
-                                            </h3>
-                                            <div className="flex flex-col gap-0.5 mt-auto">
-                                                <span className="font-bold text-[#8B5A2B] truncate text-[9px]">{yarn.brand || '無品牌'}</span>
-                                                {yarn.category && <span className="truncate bg-[#FFF6E5] text-[#A67B5B] px-1 py-0.5 rounded text-center font-bold text-[8px]">{yarn.category}</span>}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </main>
-
+                    {/* 懸浮新增按鈕 (放大) */}
                     <button
-                        onClick={openAddForm}
-                        className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#FFB017] hover:bg-amber-500 text-white w-14 h-14 md:w-16 md:h-16 rounded-full shadow-[0_8px_20px_rgba(255,176,23,0.5)] transition-transform hover:scale-105 active:scale-95 z-40 flex items-center justify-center border-[3px] border-white"
+                        onClick={() => openModal()}
+                        className="fixed bottom-8 right-8 bg-theme-400 text-white w-16 h-16 rounded-full flex items-center justify-center cute-shadow hover:bg-theme-500 hover:scale-105 transition-all z-40 border-4 border-white shadow-[0_4px_20px_rgba(245,158,11,0.3)]"
                     >
-                        <span className="text-3xl font-bold pb-1">＋</span>
+                        <Icon name="plus" size="32" />
                     </button>
 
-                    {isFormOpen && (
-                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 transition-opacity">
-                            <div className="bg-[#FFFDF9] w-full max-w-md h-[92vh] sm:h-auto sm:max-h-[92vh] rounded-t-[32px] sm:rounded-[32px] shadow-2xl flex flex-col border-2 border-amber-100 overflow-hidden animate-scale-in">
+                    {/* ========================================== */}
+                    {/* 編輯 / 新增 彈窗 */}
+                    {/* ========================================== */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div className="bg-[#FFF8E7] w-full max-w-md rounded-[32px] overflow-hidden flex flex-col max-h-[90vh] cute-modal-shadow border border-[#FFE4C4]">
                                 
-                                <div className="flex items-center justify-between px-6 py-4 bg-[#FDF8ED] border-b border-amber-100 shrink-0">
-                                    <h2 className="text-base font-bold text-amber-900">
-                                        {editingId ? '編輯物品與紀錄' : '新增物品'}
+                                {/* 標題列 */}
+                                <div className="p-4 flex justify-between items-center border-b border-[#FFE4C4] bg-[#FFF8E7] shrink-0">
+                                    <h2 className="text-lg font-bold text-[#7A4B3A]">
+                                        {currentYarn ? '物品詳情' : '新增物品'}
                                     </h2>
-                                    <div className="flex items-center gap-2">
-                                        {editingId && (
-                                            <>
-                                                <button type="button" onClick={duplicateCurrentYarn} className="px-3 py-1.5 bg-[#E8F3E8] text-[#558B55] hover:bg-[#D4E8D4] text-xs font-bold rounded-full transition-colors">
-                                                    複製
-                                                </button>
-                                                <button type="button" onClick={deleteCurrentYarn} className="px-3 py-1.5 bg-[#FEEAEA] text-[#D86060] hover:bg-[#FAD4D4] text-xs font-bold rounded-full transition-colors">
-                                                    刪除
-                                                </button>
-                                            </>
+                                    <div className="flex gap-3">
+                                        {currentYarn && (
+                                            <button onClick={deleteYarn} className="text-red-400 hover:text-red-500 transition">
+                                                <Icon name="trash-2" size="22" />
+                                            </button>
                                         )}
-                                        <button onClick={() => setIsFormOpen(false)} className="w-8 h-8 flex items-center justify-center text-[#FFB017] hover:bg-amber-100 rounded-full transition-colors">
-                                            <span className="text-lg font-bold">✕</span>
+                                        <button onClick={() => setIsModalOpen(false)} className="text-[#D97706] hover:text-[#92400E] transition">
+                                            <Icon name="x" size="26" />
                                         </button>
                                     </div>
                                 </div>
-                                
-                                <div className="overflow-y-auto flex-1 p-6 space-y-6 hide-scrollbar relative">
-                                    <div className="flex justify-center">
-                                        <div onClick={() => imageInputRef.current?.click()} className="w-32 h-32 rounded-[32px] border-2 border-dashed border-[#FFD98E] bg-[#FFF8E7] flex flex-col items-center justify-center cursor-pointer hover:border-[#FFB017] transition-colors overflow-hidden relative shadow-sm p-1">
-                                            <div className="w-full h-full rounded-[26px] overflow-hidden relative flex flex-col items-center justify-center">
-                                                {currentImageBase64 ? <img src={currentImageBase64} alt="" className="w-full h-full object-cover" /> : (
-                                                    <div className="flex flex-col items-center justify-center">
-                                                        <span className="text-3xl mb-1">📷</span>
-                                                        <span className="text-xs text-[#E59815] font-bold">上傳照片</span>
-                                                    </div>
-                                                )}
-                                            </div>
+
+                                {/* 內容捲動區 */}
+                                <div className="p-5 overflow-y-auto cute-scroll flex-1">
+                                    
+                                    {/* 圖片上傳 (方正置中圓角) */}
+                                    <div className="flex justify-center mb-6">
+                                        <div className="relative w-32 h-32 bg-white rounded-[24px] border-2 border-dashed border-theme-300 flex items-center justify-center overflow-hidden group">
+                                            {formData.imageUrl ? (
+                                                <img src={formData.imageUrl} alt="preview" className="w-full h-full object-cover object-center" />
+                                            ) : (
+                                                <div className="text-center text-theme-400">
+                                                    <Icon name="image-plus" size="28" className="mx-auto mb-1 opacity-50" />
+                                                    <span className="text-xs font-medium">上傳照片</span>
+                                                </div>
+                                            )}
+                                            <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                                         </div>
                                     </div>
 
-                                    <form className="space-y-4">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <AutocompleteInput label="品牌" name="brand" value={formData.brand} options={existingBrands} onChange={handleInputChange} placeholder="請輸入品牌" />
-                                            <div className="space-y-1.5">
-                                                <label className="text-xs font-bold text-amber-900/70">顏色</label>
-                                                <input type="text" name="color" value={formData.color || ''} onChange={handleInputChange} placeholder="請輸入顏色" className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-sm text-amber-900 font-medium transition-all" />
-                                            </div>
+                                    {/* 基礎資料表單 */}
+                                    <div className="grid grid-cols-2 gap-4 mb-6">
+                                        <div>
+                                            <label className="block text-xs font-bold text-[#9C6644] mb-1.5 ml-1">品牌</label>
+                                            <input type="text" value={formData.brand} onChange={e => setFormData({...formData, brand: e.target.value})} className="w-full bg-white rounded-2xl px-4 py-2.5 text-sm outline-none border border-theme-100 focus:border-theme-300 text-[#7A4B3A]" placeholder="請輸入品牌" />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <AutocompleteInput label="品項" name="category" value={formData.category} options={existingCategories} onChange={handleInputChange} placeholder="請輸入品項" />
-                                            <AutocompleteInput label="材質" name="material" value={formData.material} options={existingMaterials} onChange={handleInputChange} placeholder="請輸入材質" />
+                                        <div>
+                                            <label className="block text-xs font-bold text-[#9C6644] mb-1.5 ml-1">顏色</label>
+                                            <input type="text" value={formData.color} onChange={e => setFormData({...formData, color: e.target.value})} className="w-full bg-white rounded-2xl px-4 py-2.5 text-sm outline-none border border-theme-100 focus:border-theme-300 text-[#7A4B3A]" placeholder="請輸入顏色" />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-1.5">
-                                                <label className="text-xs font-bold text-amber-900/70">數量</label>
-                                                <input type="number" name="quantity" value={formData.quantity} onChange={handleInputChange} min="0" className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-sm font-bold text-amber-900 transition-all" />
-                                            </div>
-                                            <div className="space-y-1.5">
-                                                <label className="text-xs font-bold text-amber-900/70">單價</label>
-                                                <input type="number" name="price" value={formData.price} onChange={handleInputChange} min="0" step="0.01" className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-sm font-bold text-amber-900 transition-all" />
-                                            </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-[#9C6644] mb-1.5 ml-1">品項</label>
+                                            <input type="text" value={formData.item} onChange={e => setFormData({...formData, item: e.target.value})} className="w-full bg-white rounded-2xl px-4 py-2.5 text-sm outline-none border border-theme-100 focus:border-theme-300 text-[#7A4B3A]" placeholder="請輸入品項" />
                                         </div>
-                                        <div className="space-y-1.5 pb-2">
-                                            <label className="text-xs font-bold text-amber-900/70">建立商品日期</label>
-                                            <input type="date" name="createdAtInput" value={formData.createdAtInput} onChange={handleInputChange} className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-xs font-medium text-amber-900 transition-all" />
+                                        <div>
+                                            <label className="block text-xs font-bold text-[#9C6644] mb-1.5 ml-1">材質</label>
+                                            <input type="text" value={formData.material} onChange={e => setFormData({...formData, material: e.target.value})} className="w-full bg-white rounded-2xl px-4 py-2.5 text-sm outline-none border border-theme-100 focus:border-theme-300 text-[#7A4B3A]" placeholder="請輸入材質" />
                                         </div>
-                                    </form>
+                                        <div>
+                                            <label className="block text-xs font-bold text-[#9C6644] mb-1.5 ml-1">單價 (¥)</label>
+                                            <input type="number" min="0" value={formData.price} onChange={e => setFormData({...formData, price: e.target.value})} className="w-full bg-white rounded-2xl px-4 py-2.5 text-sm outline-none border border-theme-100 focus:border-theme-300 text-[#7A4B3A]" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-[#9C6644] mb-1.5 ml-1">建立日期</label>
+                                            <input type="date" value={formData.createdAt} onChange={e => setFormData({...formData, createdAt: e.target.value})} className="w-full bg-white rounded-2xl px-4 py-2.5 text-sm outline-none border border-theme-100 focus:border-theme-300 text-[#7A4B3A]" />
+                                        </div>
+                                    </div>
 
-                                    {editingId && (
-                                        <div className="pt-2 pb-4">
-                                            <div className="bg-[#FDF8ED] rounded-[28px] border border-amber-100 overflow-hidden shadow-sm">
-                                                <div className="flex bg-amber-100/40">
-                                                    <button type="button" onClick={() => setStockModalMode('in')} className={`flex-1 py-3 text-xs font-bold transition-colors ${stockModalMode === 'in' ? 'bg-[#FDF8ED] text-amber-900 border-t-[3px] border-[#FFB017] rounded-tr-xl' : 'text-amber-700/60 hover:text-amber-900'}`}>入庫</button>
-                                                    <button type="button" onClick={() => setStockModalMode('out')} className={`flex-1 py-3 text-xs font-bold transition-colors ${stockModalMode === 'out' ? 'bg-[#FDF8ED] text-amber-900 border-t-[3px] border-[#FFB017] rounded-tl-xl' : 'text-amber-700/60 hover:text-amber-900'}`}>出庫</button>
+                                    {/* 心水收納風格 - 庫存管理區塊 */}
+                                    <div className="bg-white rounded-[24px] border border-theme-100 p-4 mb-6">
+                                        <div className="text-center font-bold text-[#7A4B3A] mb-4">庫存管理</div>
+                                        
+                                        {/* 分頁 Tab */}
+                                        <div className="flex gap-2 mb-4 border-b border-theme-100 pb-2">
+                                            <button onClick={() => setInventoryTab('入庫')} className={`px-4 py-1.5 rounded-t-xl text-sm font-bold transition ${inventoryTab === '入庫' ? 'bg-theme-100 text-theme-600' : 'text-gray-400'}`}>入庫</button>
+                                            <button onClick={() => setInventoryTab('出庫')} className={`px-4 py-1.5 rounded-t-xl text-sm font-bold transition ${inventoryTab === '出庫' ? 'bg-theme-100 text-theme-600' : 'text-gray-400'}`}>出庫</button>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div className="flex justify-between items-center bg-theme-50 rounded-2xl p-3">
+                                                <span className="text-sm text-[#9C6644] font-bold">
+                                                    庫存 ( {formData.quantity} → {inventoryTab === '入庫' ? Number(formData.quantity) + Number(inventoryChange) : Math.max(0, Number(formData.quantity) - Number(inventoryChange))} )
+                                                </span>
+                                                <div className="flex items-center gap-3 bg-white px-2 py-1 rounded-xl border border-theme-100">
+                                                    <button onClick={() => setInventoryChange(Math.max(1, inventoryChange - 1))} className="text-theme-400 font-bold px-2">-</button>
+                                                    <span className="text-theme-600 font-bold min-w-[1.5rem] text-center">{inventoryChange}</span>
+                                                    <button onClick={() => setInventoryChange(inventoryChange + 1)} className="text-theme-400 font-bold px-2">+</button>
+                                                    <span className="text-sm text-[#9C6644]">件</span>
                                                 </div>
-                                                <div className="p-5 space-y-4">
-                                                    <div className="flex justify-between items-center bg-white px-4 py-3 rounded-2xl border border-amber-50">
-                                                        <span className="text-xs font-bold text-amber-900/70">庫存 ( {formData.quantity} &rarr; {stockModalMode === 'out' ? Math.max(0, formData.quantity - stockDelta) : formData.quantity + Number(stockDelta)} )</span>
-                                                        <div className="flex items-center gap-3 bg-[#FDF8ED] rounded-full px-1 py-1">
-                                                            <button type="button" onClick={() => setStockDelta(d => Math.max(1, d - 1))} className="w-6 h-6 flex items-center justify-center bg-white rounded-full text-[#FFB017] shadow-sm font-bold text-lg">-</button>
-                                                            <input type="number" min="1" value={stockDelta} onChange={e => setStockDelta(Number(e.target.value) || 1)} className="w-8 text-center bg-transparent border-none outline-none text-sm font-bold text-amber-900" />
-                                                            <button type="button" onClick={() => setStockDelta(d => d + 1)} className="w-6 h-6 flex items-center justify-center bg-white rounded-full text-[#FFB017] shadow-sm font-bold text-sm">+</button>
-                                                            <span className="text-xs text-amber-900/50 pr-2">件</span>
+                                            </div>
+
+                                            <div className="flex justify-between items-center bg-theme-50 rounded-2xl p-3">
+                                                <span className="text-sm text-[#9C6644] font-bold">日期</span>
+                                                <input type="date" value={inventoryDate} onChange={(e) => setInventoryDate(e.target.value)} className="bg-transparent text-theme-600 font-bold outline-none text-right text-sm" />
+                                            </div>
+
+                                            <input type="text" value={inventoryNote} onChange={(e) => setInventoryNote(e.target.value)} placeholder="說明請戳這裡~" className="w-full bg-theme-50 rounded-2xl p-3 text-sm outline-none text-theme-600 placeholder-theme-300" />
+                                            
+                                            <button onClick={addHistoryRecord} className="w-full py-2.5 bg-theme-100 text-theme-600 rounded-2xl font-bold text-sm hover:bg-theme-200 transition">
+                                                加入紀錄
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* 歷史異動紀錄清單 */}
+                                    {formData.history && formData.history.length > 0 && (
+                                        <div className="mb-4">
+                                            <div className="text-xs font-bold text-theme-400 mb-2 ml-2">異動紀錄</div>
+                                            <div className="space-y-2">
+                                                {formData.history.map(record => (
+                                                    <div key={record.id} className="bg-white p-3 rounded-2xl border border-theme-50 flex justify-between items-center text-sm">
+                                                        <div>
+                                                            <div className="font-bold text-[#7A4B3A]">{record.note}</div>
+                                                            <div className="text-xs text-theme-300">{record.date}</div>
+                                                        </div>
+                                                        <div className={`font-bold ${record.amount > 0 ? 'text-[#95C076]' : 'text-red-400'}`}>
+                                                            {record.amount > 0 ? '+' : ''}{record.amount}
                                                         </div>
                                                     </div>
-                                                    <div className="flex justify-between items-center bg-white px-4 py-3 rounded-2xl border border-amber-50">
-                                                        <span className="text-xs font-bold text-amber-900/70">日期</span>
-                                                        <input type="date" value={stockDate} onChange={e => setStockDate(e.target.value)} className="bg-transparent border-none outline-none text-xs font-medium text-amber-900 text-right w-32" />
-                                                    </div>
-                                                    <textarea placeholder="說明請戳這裡～" value={stockNote} onChange={e => setStockNote(e.target.value)} className="w-full bg-white px-4 py-3 rounded-2xl border border-amber-50 outline-none text-xs text-amber-900 placeholder-amber-900/30 resize-none h-20" />
-                                                    <div className="flex justify-center pt-2">
-                                                        <button type="button" onClick={handleStockTransaction} className="px-8 py-2.5 bg-[#FFB017] hover:bg-amber-500 text-white rounded-full text-xs font-bold shadow-sm shadow-amber-200 transition-colors">確認紀錄</button>
-                                                    </div>
-                                                    {currentEditingHistory.length > 0 && (
-                                                        <div className="mt-4 pt-4 border-t border-amber-100/50 space-y-2 max-h-40 overflow-y-auto hide-scrollbar">
-                                                            {currentEditingHistory.map((item) => (
-                                                                <div key={item.id} className="flex justify-between items-center bg-white/60 px-4 py-3 rounded-2xl border border-amber-50">
-                                                                    <div>
-                                                                        <div className="flex items-center gap-2 mb-1">
-                                                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.action.includes('入庫') || item.action.includes('建立') || item.action.includes('匯入') ? 'bg-[#E3F2E3] text-[#558B55]' : 'bg-[#FEEAEA] text-[#D86060]'}`}>{item.action}</span>
-                                                                            <span className="text-[10px] text-amber-600/60 font-medium">{item.time || ''}</span>
-                                                                        </div>
-                                                                        {item.note && <p className="text-[11px] text-amber-800/80 font-medium">{item.note}</p>}
-                                                                    </div>
-                                                                    <button type="button" onClick={() => deleteHistoryRecord(item.id)} className="w-6 h-6 flex justify-center items-center text-[#E78F8E] hover:bg-red-50 rounded-full">
-                                                                        <span className="text-sm font-bold">✕</span>
-                                                                    </button>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
+                                                ))}
                                             </div>
                                         </div>
                                     )}
+
                                 </div>
-                                <div className="p-4 bg-[#FDF8ED] border-t border-amber-100 shrink-0 flex justify-center">
-                                    <button type="button" onClick={saveYarn} className="w-full max-w-xs py-3.5 rounded-[20px] font-bold text-white bg-[#FFB017] hover:bg-amber-500 transition-all shadow-md shadow-amber-200 text-sm active:scale-95">保存</button>
+
+                                {/* 底部保存按鈕 */}
+                                <div className="p-4 bg-[#FFF8E7] border-t border-[#FFE4C4] shrink-0">
+                                    <button 
+                                        onClick={saveYarn}
+                                        className="w-full bg-theme-400 text-white py-3.5 rounded-[20px] font-extrabold text-[15px] cute-shadow hover:bg-theme-500 transition-colors"
+                                    >
+                                        保存
+                                    </button>
                                 </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ========================================== */}
+                    {/* CSV 匯入視窗 */}
+                    {/* ========================================== */}
+                    {isImportModalOpen && (
+                        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div className="bg-[#FFF8E7] w-full max-w-sm rounded-[32px] p-6 cute-modal-shadow relative border border-[#FFE4C4]">
+                                <button onClick={() => setIsImportModalOpen(false)} className="absolute top-4 right-4 text-theme-400">
+                                    <Icon name="x" size="24" />
+                                </button>
+                                <h3 className="text-lg font-bold text-[#7A4B3A] mb-4 text-center">批次匯入 Excel (CSV)</h3>
+                                
+                                <div className="bg-white p-4 rounded-2xl text-sm text-[#9C6644] mb-4 border border-theme-100">
+                                    <p className="font-bold mb-2 text-theme-500">支援欄位順序：</p>
+                                    <p className="mb-2">品牌, 顏色, 品項, 材質, 數量, 單價, 建立日期, 圖片網址</p>
+                                    <p className="text-xs text-theme-400">請先點擊首頁的「匯入範本」下載格式，填寫後上傳 CSV 檔案。</p>
+                                </div>
+
+                                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-theme-300 border-dashed rounded-2xl cursor-pointer bg-white hover:bg-theme-50 transition">
+                                    <div className="flex flex-col items-center justify-center pt-5 pb-6 text-theme-400">
+                                        <Icon name="upload-cloud" size="32" className="mb-2" />
+                                        <p className="text-sm font-bold">點擊選擇 CSV 檔案</p>
+                                    </div>
+                                    <input type="file" className="hidden" accept=".csv" onChange={handleFileUpload} />
+                                </label>
                             </div>
                         </div>
                     )}
