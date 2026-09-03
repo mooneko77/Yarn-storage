@@ -45,15 +45,15 @@
         // ==========================================
         // ⚠️ Firebase 資料庫連線設定 (GitHub 部署專用)
         // ==========================================
-        const MY_FIREBASE_CONFIG = {
-            apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
-            authDomain: "yarn-storage.firebaseapp.com",
-            projectId: "yarn-storage",
-            storageBucket: "yarn-storage.firebasestorage.app",
-            messagingSenderId: "355907288134",
-            appId: "1:355907288134:web:8aa9c0bcef363137415e47",
-            measurementId: "G-SJ2D0096Y3"
-        };
+       const MY_FIREBASE_CONFIG = {
+    apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
+    authDomain: "yarn-storage.firebaseapp.com",
+    projectId: "yarn-storage",
+    storageBucket: "yarn-storage.firebasestorage.app",
+    messagingSenderId: "355907288134",
+    appId: "1:355907288134:web:8aa9c0bcef363137415e47",
+    measurementId: "G-SJ2D0096Y3"
+};
 
         const platformFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const firebaseConfig = Object.keys(platformFirebaseConfig).length > 0 ? platformFirebaseConfig : MY_FIREBASE_CONFIG;
@@ -216,7 +216,7 @@
                     const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
                         setUser(currentUser);
                         if (currentUser && db) {
-                            const yarnsRef = db.collection('artifacts').doc(appId).collection('users').doc(currentUser.uid).collection('yarns');
+                            const yarnsRef = db.collection('users').doc(currentUser.uid).collection('yarns');
                             yarnsRef.onSnapshot((snapshot) => {
                                 const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                                 data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
