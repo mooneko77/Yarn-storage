@@ -41,7 +41,7 @@
         const { useState, useEffect, useMemo, useRef } = React;
 
         // ==========================================
-        // ⚠️ Firebase 資料庫連線設定
+        // Firebase 連線設定
         // ==========================================
         const MY_FIREBASE_CONFIG = {
             apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
@@ -55,7 +55,6 @@
 
         const platformFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const firebaseConfig = Object.keys(platformFirebaseConfig).length > 0 ? platformFirebaseConfig : MY_FIREBASE_CONFIG;
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'my-github-yarn-app';
 
         let db = null;
         let auth = null;
@@ -159,7 +158,6 @@
         }
 
         function App() {
-            const [user, setUser] = useState(null);
             const [yarns, setYarns] = useState([]);
             const [loading, setLoading] = useState(true);
             const [searchTerm, setSearchTerm] = useState('');
@@ -187,40 +185,23 @@
 
             const imageInputRef = useRef(null);
 
+            // 初始化與多裝置即時同步
             useEffect(() => {
                 if (isFirebaseActive && auth) {
-                    const initAuth = async () => {
-                        try {
-                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                                await auth.signInWithCustomToken(__initial_auth_token);
-                            } else {
-                                await auth.signInAnonymously();
-                            }
-                        } catch (e) {
-                            console.warn("Auth 失敗，切換本機儲存", e);
-                            fallbackLocalStorage();
-                        }
-                    };
-                    initAuth();
+                    auth.signInAnonymously().catch(err => console.warn("匿名登入失敗", err));
 
-                    const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
-                        setUser(currentUser);
-                        if (currentUser && db) {
-                            const yarnsRef = db.collection('artifacts').doc(appId).collection('users').doc(currentUser.uid).collection('yarns');
-                            yarnsRef.onSnapshot((snapshot) => {
-                                const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                                data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-                                setYarns(data);
-                                setLoading(false);
-                            }, (err) => {
-                                console.warn("Firestore 快照異常", err);
-                                fallbackLocalStorage();
-                            });
-                        } else {
-                            fallbackLocalStorage();
-                        }
+                    // 全裝置訂閱相同的 'yarns' 資料庫集合
+                    const unsubscribe = db.collection('yarns').onSnapshot((snapshot) => {
+                        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                        setYarns(data);
+                        setLoading(false);
+                    }, (err) => {
+                        console.warn("Firestore 讀取異常，降級本機儲存", err);
+                        fallbackLocalStorage();
                     });
-                    return () => unsubscribeAuth();
+
+                    return () => unsubscribe();
                 } else {
                     fallbackLocalStorage();
                 }
@@ -366,8 +347,9 @@
                         });
                     }
 
+                    const docId = editingId || 'yarn_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
                     const yarnData = {
-                        id: editingId || 'yarn_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+                        id: docId,
                         brand: (formData.brand || '').trim(),
                         color: (formData.color || '').trim(),
                         category: (formData.category || '').trim(),
@@ -380,23 +362,16 @@
                         updatedAt: Date.now()
                     };
 
-                    if (editingId) {
-                        const updated = yarns.map(y => y.id === editingId ? yarnData : y);
-                        saveToStorage(updated);
-                        if (isFirebaseActive && user && db) {
-                            await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(editingId).set(yarnData);
-                        }
+                    if (isFirebaseActive && db) {
+                        await db.collection('yarns').doc(docId).set(yarnData);
                     } else {
-                        const newYarnsList = [yarnData, ...yarns];
-                        saveToStorage(newYarnsList);
-                        if (isFirebaseActive && user && db) {
-                            await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(yarnData.id).set(yarnData);
-                        }
+                        const updated = editingId ? yarns.map(y => y.id === editingId ? yarnData : y) : [yarnData, ...yarns];
+                        saveToStorage(updated);
                     }
                     setIsFormOpen(false);
                 } catch (err) {
                     console.error("儲存失敗", err);
-                    alert("儲存失敗：" + (err.message || "請檢查欄位格式"));
+                    alert("儲存失敗：" + (err.message || "請檢查格式"));
                 }
             };
 
@@ -404,10 +379,11 @@
                 if (!editingId) return;
                 if (!confirm("確定要刪除這筆毛線資料嗎？")) return;
                 try {
-                    const updated = yarns.filter(y => y.id !== editingId);
-                    saveToStorage(updated);
-                    if (isFirebaseActive && user && db) {
-                        await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(editingId).delete();
+                    if (isFirebaseActive && db) {
+                        await db.collection('yarns').doc(editingId).delete();
+                    } else {
+                        const updated = yarns.filter(y => y.id !== editingId);
+                        saveToStorage(updated);
                     }
                     setIsFormOpen(false);
                 } catch (err) {
@@ -464,14 +440,16 @@
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = (event) => {
+                reader.onload = async (event) => {
                     try {
                         const text = event.target.result;
                         const lines = text.split('\n');
                         if (lines.length <= 1) return;
 
-                        let newItems = [...yarns];
                         const baseTime = Date.now();
+                        const batch = isFirebaseActive && db ? db.batch() : null;
+                        let newItems = [...yarns];
+
                         for (let i = 1; i < lines.length; i++) {
                             const line = lines[i].trim();
                             if (!line) continue;
@@ -479,9 +457,9 @@
                             if (cols.length >= 2) {
                                 const qty = Number(cols[4]) || 0;
                                 const createdAtVal = cols[6] ? new Date(cols[6]).getTime() : baseTime;
-                                const uniqueId = `csv_${baseTime}_${i}`;
+                                const docId = `csv_${baseTime}_${i}`;
                                 const newItem = {
-                                    id: uniqueId,
+                                    id: docId,
                                     brand: cols[0] || '',
                                     color: cols[1] || '',
                                     category: cols[2] || '',
@@ -498,18 +476,20 @@
                                     createdAt: isNaN(createdAtVal) ? baseTime : createdAtVal,
                                     updatedAt: Date.now()
                                 };
-                                newItems.push(newItem);
+
+                                if (batch) {
+                                    const docRef = db.collection('yarns').doc(docId);
+                                    batch.set(docRef, newItem);
+                                } else {
+                                    newItems.push(newItem);
+                                }
                             }
                         }
-                        
-                        saveToStorage(newItems);
-                        if (isFirebaseActive && user && db) {
-                            const batch = db.batch();
-                            newItems.slice(0, 100).forEach(item => { 
-                                const docRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(item.id);
-                                batch.set(docRef, item);
-                            });
-                            batch.commit().catch(console.error);
+
+                        if (batch) {
+                            await batch.commit();
+                        } else {
+                            saveToStorage(newItems);
                         }
                         alert("🎉 成功匯入 Excel 資料！");
                     } catch(err) {
