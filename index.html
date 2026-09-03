@@ -69,7 +69,7 @@
                 db = firebase.firestore();
                 isFirebaseActive = true;
             } catch (e) {
-                console.warn("Firebase 初始化失敗，將降級使用本機儲存", e);
+                console.warn("Firebase 初始化失敗", e);
             }
         }
 
@@ -82,14 +82,11 @@
 
         function Icon({ name, className }) {
             const [svgString, setSvgString] = useState('');
-
             useEffect(() => {
                 let isMounted = true;
                 const loadIcon = () => {
                     if (window.lucide && window.lucide.icons && window.lucide.icons[name]) {
-                        if (isMounted) {
-                            setSvgString(window.lucide.icons[name].toSvg({ class: className }));
-                        }
+                        if (isMounted) setSvgString(window.lucide.icons[name].toSvg({ class: className }));
                     } else {
                         setTimeout(loadIcon, 100);
                     }
@@ -97,7 +94,6 @@
                 loadIcon();
                 return () => { isMounted = false; };
             }, [name, className]);
-
             if (!svgString) return <span className={`inline-block ${className}`}></span>;
             return <span dangerouslySetInnerHTML={{ __html: svgString }} className="inline-flex items-center justify-center" />;
         }
@@ -123,10 +119,7 @@
                             type="text"
                             name={name}
                             value={value || ''}
-                            onChange={(e) => {
-                                onChange(e);
-                                setIsOpen(true);
-                            }}
+                            onChange={(e) => { onChange(e); setIsOpen(true); }}
                             onFocus={() => setIsOpen(true)}
                             onBlur={() => setTimeout(() => setIsOpen(false), 200)}
                             placeholder={placeholder}
@@ -134,7 +127,6 @@
                             className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-sm text-amber-900 font-medium transition-all"
                         />
                     </div>
-
                     {isOpen && filteredOptions.length > 0 && (
                         <div className="absolute z-50 w-full mt-1 bg-white border border-amber-100 rounded-2xl shadow-lg max-h-48 overflow-y-auto py-1 hide-scrollbar">
                             {filteredOptions.map(opt => (
@@ -174,33 +166,20 @@
             const [stockNote, setStockNote] = useState('');
 
             const [formData, setFormData] = useState({
-                brand: '',
-                color: '',
-                category: '',
-                material: '',
-                quantity: 1,
-                price: 0,
-                createdAtInput: toDateLocal(Date.now())
+                brand: '', color: '', category: '', material: '', quantity: 1, price: 0, createdAtInput: toDateLocal(Date.now())
             });
 
             const imageInputRef = useRef(null);
 
-            // 初始化與多裝置即時同步
             useEffect(() => {
                 if (isFirebaseActive && auth) {
                     auth.signInAnonymously().catch(err => console.warn("匿名登入失敗", err));
-
-                    // 全裝置訂閱相同的 'yarns' 資料庫集合
                     const unsubscribe = db.collection('yarns').onSnapshot((snapshot) => {
                         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                         data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
                         setYarns(data);
                         setLoading(false);
-                    }, (err) => {
-                        console.warn("Firestore 讀取異常，降級本機儲存", err);
-                        fallbackLocalStorage();
-                    });
-
+                    }, () => fallbackLocalStorage());
                     return () => unsubscribe();
                 } else {
                     fallbackLocalStorage();
@@ -211,55 +190,36 @@
                 try {
                     const localData = JSON.parse(localStorage.getItem('yarn_warehouse_data') || '[]');
                     setYarns(localData);
-                } catch(e) {
-                    setYarns([]);
-                }
+                } catch(e) { setYarns([]); }
                 setLoading(false);
             }
 
             function saveToStorage(newYarns) {
                 setYarns(newYarns);
-                try {
-                    localStorage.setItem('yarn_warehouse_data', JSON.stringify(newYarns));
-                } catch(e) {
-                    console.warn("localStorage 空間不足", e);
-                }
+                try { localStorage.setItem('yarn_warehouse_data', JSON.stringify(newYarns)); } catch(e) {}
             }
 
-            const filterTabs = useMemo(() => {
-                const mats = new Set(yarns.map(y => y.material?.trim()).filter(Boolean));
-                return ['全部', ...Array.from(mats)];
-            }, [yarns]);
-
+            const filterTabs = useMemo(() => ['全部', ...Array.from(new Set(yarns.map(y => y.material?.trim()).filter(Boolean)))], [yarns]);
             const existingBrands = useMemo(() => Array.from(new Set(yarns.map(y => y.brand?.trim()).filter(Boolean))), [yarns]);
             const existingColors = useMemo(() => Array.from(new Set(yarns.map(y => y.color?.trim()).filter(Boolean))), [yarns]);
             const existingCategories = useMemo(() => Array.from(new Set(yarns.map(y => y.category?.trim()).filter(Boolean))), [yarns]);
             const existingMaterials = useMemo(() => Array.from(new Set(yarns.map(y => y.material?.trim()).filter(Boolean))), [yarns]);
 
-            const filteredYarns = useMemo(() => {
-                return yarns.filter(yarn => {
-                    const matchSearch = (yarn.color || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-                        (yarn.brand || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (yarn.category || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (yarn.material || '').toLowerCase().includes(searchTerm.toLowerCase());
-                    
-                    const itemMat = yarn.material?.trim();
-                    const matchFilter = activeFilter === '全部' || itemMat === activeFilter;
-                    return matchSearch && matchFilter;
-                });
-            }, [yarns, searchTerm, activeFilter]);
+            const filteredYarns = useMemo(() => yarns.filter(yarn => {
+                const matchSearch = (yarn.color || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                    (yarn.brand || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    (yarn.category || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    (yarn.material || '').toLowerCase().includes(searchTerm.toLowerCase());
+                const matchFilter = activeFilter === '全部' || yarn.material?.trim() === activeFilter;
+                return matchSearch && matchFilter;
+            }), [yarns, searchTerm, activeFilter]);
 
-            const stats = useMemo(() => {
-                return yarns.reduce((acc, y) => ({
-                    totalItems: acc.totalItems + Number(y.quantity || 0),
-                    totalValue: acc.totalValue + (Number(y.quantity || 0) * Number(y.price || 0))
-                }), { totalItems: 0, totalValue: 0 });
-            }, [yarns]);
+            const stats = useMemo(() => yarns.reduce((acc, y) => ({
+                totalItems: acc.totalItems + Number(y.quantity || 0),
+                totalValue: acc.totalValue + (Number(y.quantity || 0) * Number(y.price || 0))
+            }), { totalItems: 0, totalValue: 0 }), [yarns]);
 
-            const handleInputChange = (e) => {
-                const { name, value } = e.target;
-                setFormData(prev => ({ ...prev, [name]: value }));
-            };
+            const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
             const handleImageUpload = (e) => {
                 const file = e.target.files[0];
@@ -272,10 +232,8 @@
                         const canvas = document.createElement('canvas');
                         const MAX_SIZE = 300;
                         let size = Math.min(img.width, img.height);
-                        let sx = (img.width - size) / 2;
-                        let sy = (img.height - size) / 2;
-                        canvas.width = MAX_SIZE;
-                        canvas.height = MAX_SIZE;
+                        let sx = (img.width - size) / 2, sy = (img.height - size) / 2;
+                        canvas.width = MAX_SIZE; canvas.height = MAX_SIZE;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, sx, sy, size, size, 0, 0, MAX_SIZE, MAX_SIZE);
                         setCurrentImageBase64(canvas.toDataURL('image/jpeg', 0.6));
@@ -289,10 +247,7 @@
                 setEditingId(null);
                 setCurrentImageBase64('');
                 setEditingHistory([]);
-                setStockModalMode('in');
-                setStockDelta(1);
-                setStockDate(toDateLocal(Date.now()));
-                setStockNote('');
+                setStockModalMode('in'); setStockDelta(1); setStockDate(toDateLocal(Date.now())); setStockNote('');
                 setFormData({ brand: '', color: '', category: '', material: '', quantity: 1, price: 0, createdAtInput: toDateLocal(Date.now()) });
                 setIsFormOpen(true);
             };
@@ -300,29 +255,30 @@
             const openEditForm = (yarn) => {
                 setEditingId(yarn.id);
                 setCurrentImageBase64(yarn.imageUrl || '');
-                const sanitizedHistory = (yarn.history || []).map((h, idx) => ({
-                    id: h.id || `hist_${Date.now()}_${idx}`,
-                    action: h.action || '',
-                    note: h.note || '',
-                    time: h.time || toDateLocal(Date.now()),
-                    delta: Number(h.delta) || 0
-                }));
-                setEditingHistory(sanitizedHistory);
-                setStockModalMode('in');
-                setStockDelta(1);
-                setStockNote('');
-                setStockDate(toDateLocal(Date.now()));
-                
+                setEditingHistory((yarn.history || []).map((h, idx) => ({ ...h, id: h.id || `hist_${Date.now()}_${idx}`, delta: Number(h.delta) || 0 })));
+                setStockModalMode('in'); setStockDelta(1); setStockNote(''); setStockDate(toDateLocal(Date.now()));
                 setFormData({
-                    brand: yarn.brand || '',
-                    color: yarn.color || '',
-                    category: yarn.category || '',
-                    material: yarn.material || '',
-                    quantity: Number(yarn.quantity) || 0,
-                    price: Number(yarn.price) || 0,
+                    brand: yarn.brand || '', color: yarn.color || '', category: yarn.category || '',
+                    material: yarn.material || '', quantity: Number(yarn.quantity) || 0, price: Number(yarn.price) || 0,
                     createdAtInput: toDateLocal(yarn.createdAt || Date.now())
                 });
                 setIsFormOpen(true);
+            };
+
+            // 【新增複製功能】清空圖片、顏色，並轉換為新增模式
+            const duplicateCurrentYarn = () => {
+                setEditingId(null); 
+                setCurrentImageBase64('');
+                setEditingHistory([]);
+                setFormData(prev => ({
+                    ...prev,
+                    color: '', 
+                    quantity: 1,
+                    createdAtInput: toDateLocal(Date.now())
+                }));
+                setStockModalMode('in');
+                setStockDelta(1);
+                setStockNote('');
             };
 
             const saveYarn = async (e) => {
@@ -330,13 +286,11 @@
                 try {
                     const newQty = Math.max(0, Number(formData.quantity) || 0);
                     const newPrice = Math.max(0, Number(formData.price) || 0);
-                    
                     let createdAtVal = Date.now();
                     if (formData.createdAtInput) {
                         const parsed = new Date(formData.createdAtInput).getTime();
                         if (!isNaN(parsed)) createdAtVal = parsed;
                     }
-
                     let history = [...currentEditingHistory];
                     if (!editingId && history.length === 0) {
                         history.unshift({
@@ -346,49 +300,28 @@
                             delta: newQty
                         });
                     }
-
                     const docId = editingId || 'yarn_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
                     const yarnData = {
-                        id: docId,
-                        brand: (formData.brand || '').trim(),
-                        color: (formData.color || '').trim(),
-                        category: (formData.category || '').trim(),
-                        material: (formData.material || '').trim(),
-                        quantity: newQty,
-                        price: newPrice,
-                        imageUrl: currentImageBase64 || '',
-                        history: history,
-                        createdAt: createdAtVal,
-                        updatedAt: Date.now()
+                        id: docId, brand: (formData.brand || '').trim(), color: (formData.color || '').trim(),
+                        category: (formData.category || '').trim(), material: (formData.material || '').trim(),
+                        quantity: newQty, price: newPrice, imageUrl: currentImageBase64 || '', history: history,
+                        createdAt: createdAtVal, updatedAt: Date.now()
                     };
 
-                    if (isFirebaseActive && db) {
-                        await db.collection('yarns').doc(docId).set(yarnData);
-                    } else {
-                        const updated = editingId ? yarns.map(y => y.id === editingId ? yarnData : y) : [yarnData, ...yarns];
-                        saveToStorage(updated);
-                    }
+                    if (isFirebaseActive && db) await db.collection('yarns').doc(docId).set(yarnData);
+                    else saveToStorage(editingId ? yarns.map(y => y.id === editingId ? yarnData : y) : [yarnData, ...yarns]);
                     setIsFormOpen(false);
-                } catch (err) {
-                    console.error("儲存失敗", err);
-                    alert("儲存失敗：" + (err.message || "請檢查格式"));
-                }
+                } catch (err) { alert("儲存失敗：" + (err.message || "請檢查格式")); }
             };
 
             const deleteCurrentYarn = async () => {
                 if (!editingId) return;
-                if (!confirm("確定要刪除這筆毛線資料嗎？")) return;
+                if (!confirm("確定要刪除這筆資料嗎？")) return;
                 try {
-                    if (isFirebaseActive && db) {
-                        await db.collection('yarns').doc(editingId).delete();
-                    } else {
-                        const updated = yarns.filter(y => y.id !== editingId);
-                        saveToStorage(updated);
-                    }
+                    if (isFirebaseActive && db) await db.collection('yarns').doc(editingId).delete();
+                    else saveToStorage(yarns.filter(y => y.id !== editingId));
                     setIsFormOpen(false);
-                } catch (err) {
-                    alert("刪除失敗：" + err.message);
-                }
+                } catch (err) { alert("刪除失敗：" + err.message); }
             };
 
             const handleStockTransaction = () => {
@@ -396,179 +329,64 @@
                 if (delta <= 0) return;
                 const isOut = stockModalMode === 'out';
                 const currentQty = Number(formData.quantity) || 0;
-                
                 const newQty = isOut ? Math.max(0, currentQty - delta) : currentQty + delta;
                 const actualDelta = newQty - currentQty;
                 
-                const actionDesc = isOut ? `出庫 (${actualDelta})` : `入庫 (+${actualDelta})`;
-                const newLog = {
+                setFormData(prev => ({ ...prev, quantity: newQty }));
+                setEditingHistory(prev => [{
                     id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                    action: actionDesc,
+                    action: isOut ? `出庫 (${actualDelta})` : `入庫 (+${actualDelta})`,
                     note: (stockNote || '').trim(),
                     time: stockDate || toDateLocal(Date.now()),
                     delta: actualDelta
-                };
-
-                setFormData(prev => ({ ...prev, quantity: newQty }));
-                setEditingHistory(prev => [newLog, ...prev]);
-                setStockNote('');
-                setStockDelta(1);
+                }, ...prev]);
+                setStockNote(''); setStockDelta(1);
             };
 
             const deleteHistoryRecord = (histId) => {
                 const recordToDelete = currentEditingHistory.find(h => h.id === histId);
                 if (recordToDelete && recordToDelete.delta) {
-                    const newQty = Math.max(0, Number(formData.quantity) - recordToDelete.delta);
-                    setFormData(prev => ({ ...prev, quantity: newQty }));
+                    setFormData(prev => ({ ...prev, quantity: Math.max(0, Number(formData.quantity) - recordToDelete.delta) }));
                 }
                 setEditingHistory(prev => prev.filter(h => h.id !== histId));
             };
 
-            const downloadTemplateCSV = () => {
-                const csvContent = "\uFEFF品牌,顏色,品項,材質,數量,單價,建立日期(YYYY-MM-DD)\n雪球,11淺紫色,小萌仔,冰條線,1,12.5,2026-09-02\n";
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.setAttribute('download', '毛線倉庫匯入範本.csv');
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            };
-
-            const handleCSVUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = async (event) => {
-                    try {
-                        const text = event.target.result;
-                        const lines = text.split('\n');
-                        if (lines.length <= 1) return;
-
-                        const baseTime = Date.now();
-                        const batch = isFirebaseActive && db ? db.batch() : null;
-                        let newItems = [...yarns];
-
-                        for (let i = 1; i < lines.length; i++) {
-                            const line = lines[i].trim();
-                            if (!line) continue;
-                            const cols = line.split(',').map(c => c.replace(/^"(.*)"$/, '$1').trim());
-                            if (cols.length >= 2) {
-                                const qty = Number(cols[4]) || 0;
-                                const createdAtVal = cols[6] ? new Date(cols[6]).getTime() : baseTime;
-                                const docId = `csv_${baseTime}_${i}`;
-                                const newItem = {
-                                    id: docId,
-                                    brand: cols[0] || '',
-                                    color: cols[1] || '',
-                                    category: cols[2] || '',
-                                    material: cols[3] || '',
-                                    quantity: qty,
-                                    price: Number(cols[5]) || 0,
-                                    imageUrl: '',
-                                    history: [{
-                                        id: `hist_${baseTime}_${i}`,
-                                        action: `Excel 匯入 (數量: ${qty})`,
-                                        time: cols[6] || toDateLocal(Date.now()),
-                                        delta: qty
-                                    }],
-                                    createdAt: isNaN(createdAtVal) ? baseTime : createdAtVal,
-                                    updatedAt: Date.now()
-                                };
-
-                                if (batch) {
-                                    const docRef = db.collection('yarns').doc(docId);
-                                    batch.set(docRef, newItem);
-                                } else {
-                                    newItems.push(newItem);
-                                }
-                            }
-                        }
-
-                        if (batch) {
-                            await batch.commit();
-                        } else {
-                            saveToStorage(newItems);
-                        }
-                        alert("🎉 成功匯入 Excel 資料！");
-                    } catch(err) {
-                        alert("CSV 格式解析失敗");
-                    }
-                };
-                reader.readAsText(file);
-                e.target.value = '';
-            };
-
             if (loading) {
-                return (
-                    <div className="min-h-screen bg-[#FFFDF9] flex items-center justify-center">
-                        <div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin"></div>
-                    </div>
-                );
+                return <div className="min-h-screen bg-[#FFFDF9] flex items-center justify-center"><div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin"></div></div>;
             }
 
             return (
                 <div className="min-h-screen bg-[#FFFDF9] text-[#5C5446] font-sans pb-24 md:pb-8 relative">
-                    <input type="file" id="csvFileInput" accept=".csv" className="hidden" onChange={handleCSVUpload} />
                     <input type="file" id="imageFileInput" accept="image/*" ref={imageInputRef} className="hidden" onChange={handleImageUpload} />
 
-                    {/* Header */}
-                    <header className="bg-[#FFFDF9] sticky top-0 z-10 shadow-sm border-b border-amber-100">
+                    {/* 頂部導覽列：提高 z-index 至 30，解決卡片重疊問題 */}
+                    <header className="bg-[#FFFDF9] sticky top-0 z-30 shadow-sm border-b border-amber-100">
                         <div className="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
-                            <div className="flex flex-col sm:flex-row justify-between gap-4 sm:items-center">
-                                <div className="flex items-center gap-4 flex-1">
-                                    <h1 className="text-xl font-bold text-amber-900 whitespace-nowrap hidden sm:block">
-                                        我的毛線
-                                    </h1>
-                                    <div className="relative flex-1 max-w-md">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <Icon name="search" className="w-4 h-4 text-amber-300" />
-                                        </div>
-                                        <input
-                                            type="text"
-                                            placeholder="搜尋顏色、品項、品牌、材質..."
-                                            value={searchTerm}
-                                            onChange={(e) => setSearchTerm(e.target.value)}
-                                            className="block w-full pl-10 pr-3 py-2.5 border-none rounded-full bg-amber-50/70 text-amber-900 placeholder-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-300 sm:text-sm transition-shadow"
-                                        />
+                            <div className="flex flex-col sm:flex-row justify-between gap-3 sm:items-center">
+                                <div className="relative flex-1 max-w-full sm:max-w-md">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <Icon name="search" className="w-4 h-4 text-amber-300" />
                                     </div>
+                                    <input
+                                        type="text" placeholder="搜尋顏色、品項、品牌..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                                        className="block w-full pl-9 pr-3 py-2 border-none rounded-full bg-amber-50/70 text-amber-900 placeholder-amber-300 focus:ring-2 focus:ring-amber-300 text-sm transition-shadow outline-none"
+                                    />
                                 </div>
-                                
-                                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 hide-scrollbar">
-                                    <div className="flex gap-3 text-xs font-medium text-amber-800 whitespace-nowrap bg-[#FDF8ED] px-3.5 py-1.5 rounded-full border border-amber-200/60 shadow-sm">
+                                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto overflow-x-auto hide-scrollbar">
+                                    <div className="flex gap-2 text-[11px] sm:text-xs font-medium text-amber-800 whitespace-nowrap bg-[#FDF8ED] px-3 py-1.5 rounded-full border border-amber-200/60 shadow-sm">
                                         <span>共 <strong className="text-amber-900">{stats.totalItems}</strong> 件</span>
                                         <div className="w-px bg-amber-200"></div>
                                         <span>價值 <strong className="text-amber-900">¥{stats.totalValue.toLocaleString()}</strong></span>
                                     </div>
-                                    
-                                    <button
-                                        onClick={downloadTemplateCSV}
-                                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-amber-800 bg-[#FDF8ED] hover:bg-amber-100/60 rounded-full transition-colors whitespace-nowrap border border-amber-200"
-                                    >
-                                        <Icon name="download" className="w-3.5 h-3.5 text-amber-600" />
-                                        <span>匯入範本</span>
-                                    </button>
-
-                                    <button
-                                        onClick={() => document.getElementById('csvFileInput').click()}
-                                        className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#FFB017] hover:bg-amber-500 rounded-full transition-colors whitespace-nowrap shadow-md shadow-amber-200"
-                                    >
-                                        <Icon name="upload" className="w-3.5 h-3.5" />
-                                        <span>匯入 Excel</span>
-                                    </button>
                                 </div>
                             </div>
                             
-                            <div className="mt-3 flex overflow-x-auto gap-2 pb-1 hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+                            <div className="mt-2.5 flex overflow-x-auto gap-2 pb-1 hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
                                 {filterTabs.map(tab => (
                                     <button
-                                        key={tab}
-                                        onClick={() => setActiveFilter(tab)}
-                                        className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all ${
-                                            activeFilter === tab
-                                                ? 'bg-[#FFB017] text-white shadow-md shadow-amber-200'
-                                                : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200/70'
+                                        key={tab} onClick={() => setActiveFilter(tab)}
+                                        className={`px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold whitespace-nowrap transition-all ${
+                                            activeFilter === tab ? 'bg-[#FFB017] text-white shadow-md shadow-amber-200' : 'bg-white text-amber-800 hover:bg-amber-50 border border-amber-200/70'
                                         }`}
                                     >
                                         {tab}
@@ -578,49 +396,47 @@
                         </div>
                     </header>
 
-                    {/* Main Content */}
-                    <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5">
+                    {/* 卡片區域：改為高密度排版 (手機4排、電腦8排) */}
+                    <main className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 py-4">
                         {filteredYarns.length === 0 ? (
-                            <div className="text-center py-24">
-                                <Icon name="package" className="w-20 h-20 text-amber-800/10 mx-auto mb-6" />
-                                <h2 className="text-xl font-bold text-amber-900 mb-2">倉庫空空的</h2>
-                                <p className="text-sm text-amber-700/60 font-medium">點擊右下角新增，或使用 Excel 批次匯入資料。</p>
+                            <div className="text-center py-20">
+                                <Icon name="package" className="w-16 h-16 text-amber-800/10 mx-auto mb-4" />
+                                <h2 className="text-lg font-bold text-amber-900 mb-1">倉庫空空的</h2>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3 sm:gap-4">
+                            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-2 sm:gap-3">
                                 {filteredYarns.map(yarn => (
                                     <div 
-                                        key={yarn.id} 
-                                        onClick={() => openEditForm(yarn)} 
-                                        className="bg-white rounded-3xl overflow-hidden shadow-sm border border-amber-100 hover:shadow-md hover:border-amber-200 transition-all group flex flex-col relative cursor-pointer active:scale-[0.98]"
+                                        key={yarn.id} onClick={() => openEditForm(yarn)} 
+                                        className="bg-white rounded-[14px] sm:rounded-2xl overflow-hidden shadow-sm border border-amber-100 hover:shadow-md hover:border-amber-200 transition-all group flex flex-col relative cursor-pointer active:scale-95"
                                     >
                                         <div className="aspect-square bg-[#FDF8ED] relative p-1">
-                                            <div className="w-full h-full rounded-[20px] overflow-hidden relative">
+                                            <div className="w-full h-full rounded-[10px] overflow-hidden relative">
                                                 {yarn.imageUrl ? (
                                                     <img src={yarn.imageUrl} alt="" className="w-full h-full object-cover" />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center text-amber-200 bg-amber-50">
-                                                        <Icon name="image" className="w-10 h-10" />
+                                                        <Icon name="image" className="w-6 h-6" />
                                                     </div>
                                                 )}
-                                                
-                                                <div className="absolute bottom-1 right-1 z-10 bg-[#FFB017] text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-sm border-2 border-white min-w-[24px] text-center">
+                                                {/* 數量標籤 */}
+                                                <div className="absolute bottom-1 right-1 z-10 bg-[#FFB017] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white min-w-[18px] text-center leading-none">
                                                     {yarn.quantity}
                                                 </div>
                                             </div>
-
-                                            <div className="absolute top-3 left-3 bg-[#84a95c] text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm border-2 border-white">
+                                            {/* 價格標籤 */}
+                                            <div className="absolute top-1.5 left-1.5 bg-[#84a95c] text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white leading-none">
                                                 ¥{yarn.price}
                                             </div>
                                         </div>
 
-                                        <div className="p-3.5 pt-4 flex flex-col flex-1 bg-white justify-between">
-                                            <h3 className="text-base sm:text-lg font-extrabold text-[#7A4016] leading-snug line-clamp-1 mb-2">
-                                                {yarn.color || '未命名顏色'}
+                                        <div className="p-2 flex flex-col flex-1 bg-white justify-between">
+                                            <h3 className="text-[10px] sm:text-xs font-extrabold text-[#7A4016] leading-tight line-clamp-1 mb-1">
+                                                {yarn.color || '未命名'}
                                             </h3>
-                                            <div className="flex flex-wrap items-center text-xs gap-1.5 mt-auto">
-                                                <span className="font-bold text-[#8B5A2B] truncate">{yarn.brand || '未分類品牌'}</span>
-                                                {yarn.category && <span className="truncate bg-[#FFF6E5] text-[#A67B5B] px-2 py-0.5 rounded-md font-bold text-[11px]">{yarn.category}</span>}
+                                            <div className="flex flex-col gap-0.5 mt-auto">
+                                                <span className="font-bold text-[#8B5A2B] truncate text-[9px]">{yarn.brand || '無品牌'}</span>
+                                                {yarn.category && <span className="truncate bg-[#FFF6E5] text-[#A67B5B] px-1 py-0.5 rounded text-center font-bold text-[8px]">{yarn.category}</span>}
                                             </div>
                                         </div>
                                     </div>
@@ -629,74 +445,61 @@
                         )}
                     </main>
 
-                    {/* Floating Add Button */}
+                    {/* 浮動新增按鈕 */}
                     <button
                         onClick={openAddForm}
-                        className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#FFB017] hover:bg-amber-500 text-white p-5 md:p-6 rounded-full shadow-[0_8px_25px_rgba(255,176,23,0.5)] transition-transform hover:scale-105 active:scale-95 z-40 flex items-center justify-center border-4 border-white"
+                        className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#FFB017] hover:bg-amber-500 text-white p-4 md:p-5 rounded-full shadow-[0_8px_20px_rgba(255,176,23,0.5)] transition-transform hover:scale-105 active:scale-95 z-40 flex items-center justify-center border-[3px] border-white"
                     >
-                        <Icon name="plus" className="w-8 h-8 md:w-10 md:h-10 stroke-[3]" />
+                        <Icon name="plus" className="w-7 h-7 md:w-8 md:h-8 stroke-[3]" />
                     </button>
 
-                    {/* Edit / Add Modal */}
+                    {/* 編輯/新增表單視窗 */}
                     {isFormOpen && (
                         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 transition-opacity">
                             <div className="bg-[#FFFDF9] w-full max-w-md h-[92vh] sm:h-auto sm:max-h-[92vh] rounded-t-[32px] sm:rounded-[32px] shadow-2xl flex flex-col border-2 border-amber-100 overflow-hidden animate-scale-in">
                                 
-                                {/* Modal Header */}
                                 <div className="flex items-center justify-between px-6 py-4 bg-[#FDF8ED] border-b border-amber-100 shrink-0">
                                     <h2 className="text-base font-bold text-amber-900">
                                         {editingId ? '編輯物品與紀錄' : '新增物品'}
                                     </h2>
-                                    <div className="flex gap-2">
+                                    <div className="flex gap-1.5">
                                         {editingId && (
-                                            <button 
-                                                type="button"
-                                                onClick={deleteCurrentYarn}
-                                                className="p-2 text-[#E78F8E] hover:bg-red-50 rounded-full transition-colors"
-                                            >
-                                                <Icon name="trash-2" className="w-5 h-5" />
-                                            </button>
+                                            <>
+                                                {/* 複製按鈕 */}
+                                                <button type="button" onClick={duplicateCurrentYarn} className="p-2 text-[#84a95c] hover:bg-green-50 rounded-full transition-colors" title="複製此毛線 (保留品牌/品項/材質)">
+                                                    <Icon name="copy" className="w-5 h-5" />
+                                                </button>
+                                                <button type="button" onClick={deleteCurrentYarn} className="p-2 text-[#E78F8E] hover:bg-red-50 rounded-full transition-colors">
+                                                    <Icon name="trash-2" className="w-5 h-5" />
+                                                </button>
+                                            </>
                                         )}
-                                        <button 
-                                            onClick={() => setIsFormOpen(false)}
-                                            className="p-2 text-[#FFB017] hover:bg-amber-100 rounded-full transition-colors"
-                                        >
+                                        <button onClick={() => setIsFormOpen(false)} className="p-2 text-[#FFB017] hover:bg-amber-100 rounded-full transition-colors">
                                             <Icon name="x" className="w-6 h-6" />
                                         </button>
                                     </div>
                                 </div>
                                 
-                                {/* Modal Body */}
                                 <div className="overflow-y-auto flex-1 p-6 space-y-6 hide-scrollbar relative">
                                     <div className="flex justify-center">
-                                        <div 
-                                            onClick={() => imageInputRef.current?.click()}
-                                            className="w-32 h-32 rounded-[32px] border-2 border-dashed border-[#FFD98E] bg-[#FFF8E7] flex flex-col items-center justify-center cursor-pointer hover:border-[#FFB017] hover:bg-[#FFF2D1] transition-colors overflow-hidden relative group shadow-sm p-1"
-                                        >
+                                        <div onClick={() => imageInputRef.current?.click()} className="w-32 h-32 rounded-[32px] border-2 border-dashed border-[#FFD98E] bg-[#FFF8E7] flex flex-col items-center justify-center cursor-pointer hover:border-[#FFB017] transition-colors overflow-hidden relative shadow-sm p-1">
                                             <div className="w-full h-full rounded-[26px] overflow-hidden relative flex flex-col items-center justify-center">
-                                                {currentImageBase64 ? (
-                                                    <img src={currentImageBase64} alt="" className="w-full h-full object-cover" />
-                                                ) : (
-                                                    <div className="flex flex-col items-center justify-center">
-                                                        <Icon name="camera" className="w-8 h-8 mb-2 text-[#FFB017]" />
-                                                        <span className="text-xs text-[#E59815] font-bold">上傳照片</span>
-                                                    </div>
+                                                {currentImageBase64 ? <img src={currentImageBase64} alt="" className="w-full h-full object-cover" /> : (
+                                                    <div className="flex flex-col items-center justify-center"><Icon name="camera" className="w-8 h-8 mb-2 text-[#FFB017]" /><span className="text-xs text-[#E59815] font-bold">上傳照片</span></div>
                                                 )}
                                             </div>
                                         </div>
                                     </div>
 
-                                    <form id="yarnForm" className="space-y-4">
+                                    <form className="space-y-4">
                                         <div className="grid grid-cols-2 gap-4">
                                             <AutocompleteInput label="品牌" name="brand" value={formData.brand} options={existingBrands} onChange={handleInputChange} placeholder="請輸入品牌" />
                                             <AutocompleteInput label="顏色" name="color" value={formData.color} options={existingColors} onChange={handleInputChange} placeholder="請輸入顏色" />
                                         </div>
-
                                         <div className="grid grid-cols-2 gap-4">
                                             <AutocompleteInput label="品項" name="category" value={formData.category} options={existingCategories} onChange={handleInputChange} placeholder="請輸入品項" />
                                             <AutocompleteInput label="材質" name="material" value={formData.material} options={existingMaterials} onChange={handleInputChange} placeholder="請輸入材質" />
                                         </div>
-
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-1.5">
                                                 <label className="text-xs font-bold text-amber-900/70">數量</label>
@@ -707,7 +510,6 @@
                                                 <input type="number" name="price" value={formData.price} onChange={handleInputChange} min="0" step="0.01" className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-sm font-bold text-amber-900 transition-all" />
                                             </div>
                                         </div>
-
                                         <div className="space-y-1.5 pb-2">
                                             <label className="text-xs font-bold text-amber-900/70">建立商品日期</label>
                                             <input type="date" name="createdAtInput" value={formData.createdAtInput} onChange={handleInputChange} className="w-full px-4 py-3 rounded-2xl bg-amber-50/50 border border-amber-100 focus:ring-2 focus:ring-amber-300 outline-none text-xs font-medium text-amber-900 transition-all" />
@@ -718,27 +520,12 @@
                                         <div className="pt-2 pb-4">
                                             <div className="bg-[#FDF8ED] rounded-[28px] border border-amber-100 overflow-hidden shadow-sm">
                                                 <div className="flex bg-amber-100/40">
-                                                    <button 
-                                                        type="button" 
-                                                        onClick={() => setStockModalMode('in')}
-                                                        className={`flex-1 py-3 text-xs font-bold transition-colors ${stockModalMode === 'in' ? 'bg-[#FDF8ED] text-amber-900 border-t-[3px] border-[#FFB017] rounded-tr-xl' : 'text-amber-700/60 hover:text-amber-900'}`}
-                                                    >
-                                                        入庫
-                                                    </button>
-                                                    <button 
-                                                        type="button" 
-                                                        onClick={() => setStockModalMode('out')}
-                                                        className={`flex-1 py-3 text-xs font-bold transition-colors ${stockModalMode === 'out' ? 'bg-[#FDF8ED] text-amber-900 border-t-[3px] border-[#FFB017] rounded-tl-xl' : 'text-amber-700/60 hover:text-amber-900'}`}
-                                                    >
-                                                        出庫
-                                                    </button>
+                                                    <button type="button" onClick={() => setStockModalMode('in')} className={`flex-1 py-3 text-xs font-bold transition-colors ${stockModalMode === 'in' ? 'bg-[#FDF8ED] text-amber-900 border-t-[3px] border-[#FFB017] rounded-tr-xl' : 'text-amber-700/60 hover:text-amber-900'}`}>入庫</button>
+                                                    <button type="button" onClick={() => setStockModalMode('out')} className={`flex-1 py-3 text-xs font-bold transition-colors ${stockModalMode === 'out' ? 'bg-[#FDF8ED] text-amber-900 border-t-[3px] border-[#FFB017] rounded-tl-xl' : 'text-amber-700/60 hover:text-amber-900'}`}>出庫</button>
                                                 </div>
-
                                                 <div className="p-5 space-y-4">
                                                     <div className="flex justify-between items-center bg-white px-4 py-3 rounded-2xl border border-amber-50">
-                                                        <span className="text-xs font-bold text-amber-900/70">
-                                                            庫存 ( {formData.quantity} &rarr; {stockModalMode === 'out' ? Math.max(0, formData.quantity - stockDelta) : formData.quantity + Number(stockDelta)} )
-                                                        </span>
+                                                        <span className="text-xs font-bold text-amber-900/70">庫存 ( {formData.quantity} &rarr; {stockModalMode === 'out' ? Math.max(0, formData.quantity - stockDelta) : formData.quantity + Number(stockDelta)} )</span>
                                                         <div className="flex items-center gap-3 bg-[#FDF8ED] rounded-full px-1 py-1">
                                                             <button type="button" onClick={() => setStockDelta(d => Math.max(1, d - 1))} className="w-6 h-6 flex items-center justify-center bg-white rounded-full text-[#FFB017] shadow-sm font-bold text-lg">-</button>
                                                             <input type="number" min="1" value={stockDelta} onChange={e => setStockDelta(Number(e.target.value) || 1)} className="w-8 text-center bg-transparent border-none outline-none text-sm font-bold text-amber-900" />
@@ -746,45 +533,26 @@
                                                             <span className="text-xs text-amber-900/50 pr-2">件</span>
                                                         </div>
                                                     </div>
-
                                                     <div className="flex justify-between items-center bg-white px-4 py-3 rounded-2xl border border-amber-50">
                                                         <span className="text-xs font-bold text-amber-900/70">日期</span>
                                                         <input type="date" value={stockDate} onChange={e => setStockDate(e.target.value)} className="bg-transparent border-none outline-none text-xs font-medium text-amber-900 text-right w-32" />
                                                     </div>
-
-                                                    <textarea 
-                                                        placeholder="說明請戳這裡～" 
-                                                        value={stockNote} 
-                                                        onChange={e => setStockNote(e.target.value)}
-                                                        className="w-full bg-white px-4 py-3 rounded-2xl border border-amber-50 outline-none text-xs text-amber-900 placeholder-amber-900/30 resize-none h-20"
-                                                    />
-
+                                                    <textarea placeholder="說明請戳這裡～" value={stockNote} onChange={e => setStockNote(e.target.value)} className="w-full bg-white px-4 py-3 rounded-2xl border border-amber-50 outline-none text-xs text-amber-900 placeholder-amber-900/30 resize-none h-20" />
                                                     <div className="flex justify-center pt-2">
-                                                        <button 
-                                                            type="button" 
-                                                            onClick={handleStockTransaction}
-                                                            className="px-8 py-2.5 bg-[#FFB017] hover:bg-amber-500 text-white rounded-full text-xs font-bold shadow-sm shadow-amber-200 transition-colors"
-                                                        >
-                                                            確認紀錄
-                                                        </button>
+                                                        <button type="button" onClick={handleStockTransaction} className="px-8 py-2.5 bg-[#FFB017] hover:bg-amber-500 text-white rounded-full text-xs font-bold shadow-sm shadow-amber-200 transition-colors">確認紀錄</button>
                                                     </div>
-
                                                     {currentEditingHistory.length > 0 && (
                                                         <div className="mt-4 pt-4 border-t border-amber-100/50 space-y-2 max-h-40 overflow-y-auto hide-scrollbar">
                                                             {currentEditingHistory.map((item) => (
                                                                 <div key={item.id} className="flex justify-between items-center bg-white/60 px-4 py-3 rounded-2xl border border-amber-50">
                                                                     <div>
                                                                         <div className="flex items-center gap-2 mb-1">
-                                                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.action.includes('入庫') || item.action.includes('建立') || item.action.includes('匯入') ? 'bg-[#E3F2E3] text-[#558B55]' : 'bg-[#FEEAEA] text-[#D86060]'}`}>
-                                                                                {item.action}
-                                                                            </span>
+                                                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${item.action.includes('入庫') || item.action.includes('建立') || item.action.includes('匯入') ? 'bg-[#E3F2E3] text-[#558B55]' : 'bg-[#FEEAEA] text-[#D86060]'}`}>{item.action}</span>
                                                                             <span className="text-[10px] text-amber-600/60 font-medium">{item.time || ''}</span>
                                                                         </div>
                                                                         {item.note && <p className="text-[11px] text-amber-800/80 font-medium">{item.note}</p>}
                                                                     </div>
-                                                                    <button type="button" onClick={() => deleteHistoryRecord(item.id)} className="text-[#E78F8E] hover:text-red-500 p-2">
-                                                                        <Icon name="x" className="w-4 h-4" />
-                                                                    </button>
+                                                                    <button type="button" onClick={() => deleteHistoryRecord(item.id)} className="text-[#E78F8E] hover:text-red-500 p-2"><Icon name="x" className="w-4 h-4" /></button>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -794,16 +562,8 @@
                                         </div>
                                     )}
                                 </div>
-                                
-                                {/* Modal Footer */}
                                 <div className="p-4 bg-[#FDF8ED] border-t border-amber-100 shrink-0 flex justify-center">
-                                    <button 
-                                        type="button"
-                                        onClick={saveYarn}
-                                        className="w-full max-w-xs py-3.5 rounded-[20px] font-bold text-white bg-[#FFB017] hover:bg-amber-500 transition-all shadow-md shadow-amber-200 text-sm active:scale-95"
-                                    >
-                                        保存
-                                    </button>
+                                    <button type="button" onClick={saveYarn} className="w-full max-w-xs py-3.5 rounded-[20px] font-bold text-white bg-[#FFB017] hover:bg-amber-500 transition-all shadow-md shadow-amber-200 text-sm active:scale-95">保存</button>
                                 </div>
                             </div>
                         </div>
