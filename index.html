@@ -8,7 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- React & ReactDOM -->
+    <!-- React & ReactDOM (React 18) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <!-- Babel for JSX -->
@@ -19,16 +19,14 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     
     <style>
-        /* 隱藏網頁與彈窗的滾動條，保持畫面整潔 */
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         body {
-            background-color: #FFFDF9; /* 溫暖的奶油白背景 */
+            background-color: #FFFDF9;
             color: #5C5446;
             font-family: system-ui, -apple-system, sans-serif;
             -webkit-tap-highlight-color: transparent;
         }
-        /* 自定義彈窗動畫 */
         @keyframes scaleIn {
             from { transform: scale(0.95); opacity: 0; }
             to { transform: scale(1); opacity: 1; }
@@ -43,17 +41,17 @@
         const { useState, useEffect, useMemo, useRef } = React;
 
         // ==========================================
-        // ⚠️ Firebase 資料庫連線設定 (GitHub 部署專用)
+        // ⚠️ Firebase 資料庫連線設定
         // ==========================================
-       const firebaseConfig = {
-  apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
-  authDomain: "yarn-storage.firebaseapp.com",
-  projectId: "yarn-storage",
-  storageBucket: "yarn-storage.firebasestorage.app",
-  messagingSenderId: "355907288134",
-  appId: "1:355907288134:web:8aa9c0bcef363137415e47",
-  measurementId: "G-SJ2D0096Y3"
-};
+        const MY_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyC9l_XKg0SwD59hquvTfOeFopTcKycM5KQ",
+            authDomain: "yarn-storage.firebaseapp.com",
+            projectId: "yarn-storage",
+            storageBucket: "yarn-storage.firebasestorage.app",
+            messagingSenderId: "355907288134",
+            appId: "1:355907288134:web:8aa9c0bcef363137415e47",
+            measurementId: "G-SJ2D0096Y3"
+        };
 
         const platformFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const firebaseConfig = Object.keys(platformFirebaseConfig).length > 0 ? platformFirebaseConfig : MY_FIREBASE_CONFIG;
@@ -63,7 +61,6 @@
         let auth = null;
         let isFirebaseActive = false;
 
-        // 安全地初始化 Firebase
         if (Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey) {
             try {
                 if (!firebase.apps.length) {
@@ -73,31 +70,29 @@
                 db = firebase.firestore();
                 isFirebaseActive = true;
             } catch (e) {
-                console.warn("Firebase 初始化失敗，將降級使用本機儲存 (localStorage)", e);
+                console.warn("Firebase 初始化失敗，將降級使用本機儲存", e);
             }
         }
 
-        // 日期格式化 (YYYY-MM-DD)
         function toDateLocal(timestamp) {
             const d = new Date(timestamp || Date.now());
+            if (isNaN(d.getTime())) return new Date().toISOString().split('T')[0];
             const pad = n => String(n).padStart(2, '0');
             return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
         }
 
-        // 超級安全的圖示渲染元件 (修復圖示消失問題)
         function Icon({ name, className }) {
             const [svgString, setSvgString] = useState('');
 
             useEffect(() => {
                 let isMounted = true;
                 const loadIcon = () => {
-                    if (window.lucide && window.lucide.icons[name]) {
+                    if (window.lucide && window.lucide.icons && window.lucide.icons[name]) {
                         if (isMounted) {
                             setSvgString(window.lucide.icons[name].toSvg({ class: className }));
                         }
                     } else {
-                        // 如果網路慢還沒載入，每 50 毫秒重試一次，直到載入成功
-                        setTimeout(loadIcon, 50);
+                        setTimeout(loadIcon, 100);
                     }
                 };
                 loadIcon();
@@ -108,7 +103,6 @@
             return <span dangerouslySetInnerHTML={{ __html: svgString }} className="inline-flex items-center justify-center" />;
         }
 
-        // 自動完成輸入框 (帶有下拉記憶選單)
         function AutocompleteInput({ label, name, value, options, onChange, placeholder, required }) {
             const [isOpen, setIsOpen] = useState(false);
             const inputRef = useRef(null);
@@ -129,7 +123,7 @@
                             ref={inputRef}
                             type="text"
                             name={name}
-                            value={value}
+                            value={value || ''}
                             onChange={(e) => {
                                 onChange(e);
                                 setIsOpen(true);
@@ -165,26 +159,22 @@
         }
 
         function App() {
-            // --- State Management ---
             const [user, setUser] = useState(null);
             const [yarns, setYarns] = useState([]);
             const [loading, setLoading] = useState(true);
             const [searchTerm, setSearchTerm] = useState('');
             const [activeFilter, setActiveFilter] = useState('全部');
             
-            // 表單與編輯狀態
             const [isFormOpen, setIsFormOpen] = useState(false);
             const [editingId, setEditingId] = useState(null);
             const [currentImageBase64, setCurrentImageBase64] = useState('');
             const [currentEditingHistory, setEditingHistory] = useState([]);
             
-            // 庫存管理視窗狀態
             const [stockModalMode, setStockModalMode] = useState('in');
             const [stockDelta, setStockDelta] = useState(1);
             const [stockDate, setStockDate] = useState(toDateLocal(Date.now()));
             const [stockNote, setStockNote] = useState('');
 
-            // 主要表單資料 (預設空白)
             const [formData, setFormData] = useState({
                 brand: '',
                 color: '',
@@ -207,7 +197,7 @@
                                 await auth.signInAnonymously();
                             }
                         } catch (e) {
-                            console.warn("Auth failed, using local storage", e);
+                            console.warn("Auth 失敗，切換本機儲存", e);
                             fallbackLocalStorage();
                         }
                     };
@@ -216,14 +206,14 @@
                     const unsubscribeAuth = auth.onAuthStateChanged((currentUser) => {
                         setUser(currentUser);
                         if (currentUser && db) {
-                            const yarnsRef = db.collection('users').doc(currentUser.uid).collection('yarns');
+                            const yarnsRef = db.collection('artifacts').doc(appId).collection('users').doc(currentUser.uid).collection('yarns');
                             yarnsRef.onSnapshot((snapshot) => {
                                 const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                                 data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
                                 setYarns(data);
                                 setLoading(false);
                             }, (err) => {
-                                console.warn("Firestore snapshot error, falling back", err);
+                                console.warn("Firestore 快照異常", err);
                                 fallbackLocalStorage();
                             });
                         } else {
@@ -250,7 +240,9 @@
                 setYarns(newYarns);
                 try {
                     localStorage.setItem('yarn_warehouse_data', JSON.stringify(newYarns));
-                } catch(e) {}
+                } catch(e) {
+                    console.warn("localStorage 空間不足", e);
+                }
             }
 
             const filterTabs = useMemo(() => {
@@ -297,7 +289,7 @@
                     img.src = event.target.result;
                     img.onload = () => {
                         const canvas = document.createElement('canvas');
-                        const MAX_SIZE = 400;
+                        const MAX_SIZE = 300;
                         let size = Math.min(img.width, img.height);
                         let sx = (img.width - size) / 2;
                         let sy = (img.height - size) / 2;
@@ -305,7 +297,7 @@
                         canvas.height = MAX_SIZE;
                         const ctx = canvas.getContext('2d');
                         ctx.drawImage(img, sx, sy, size, size, 0, 0, MAX_SIZE, MAX_SIZE);
-                        setCurrentImageBase64(canvas.toDataURL('image/jpeg', 0.7));
+                        setCurrentImageBase64(canvas.toDataURL('image/jpeg', 0.6));
                     };
                 };
                 reader.readAsDataURL(file);
@@ -328,11 +320,11 @@
                 setEditingId(yarn.id);
                 setCurrentImageBase64(yarn.imageUrl || '');
                 const sanitizedHistory = (yarn.history || []).map((h, idx) => ({
-                    id: h.id || `hist_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+                    id: h.id || `hist_${Date.now()}_${idx}`,
                     action: h.action || '',
                     note: h.note || '',
                     time: h.time || toDateLocal(Date.now()),
-                    delta: h.delta || 0
+                    delta: Number(h.delta) || 0
                 }));
                 setEditingHistory(sanitizedHistory);
                 setStockModalMode('in');
@@ -345,65 +337,82 @@
                     color: yarn.color || '',
                     category: yarn.category || '',
                     material: yarn.material || '',
-                    quantity: yarn.quantity || 0,
-                    price: yarn.price || 0,
+                    quantity: Number(yarn.quantity) || 0,
+                    price: Number(yarn.price) || 0,
                     createdAtInput: toDateLocal(yarn.createdAt || Date.now())
                 });
                 setIsFormOpen(true);
             };
 
-            const saveYarn = (e) => {
+            const saveYarn = async (e) => {
                 if (e) e.preventDefault();
-                const newQty = Math.max(0, Number(formData.quantity));
-                const createdAtVal = formData.createdAtInput ? new Date(formData.createdAtInput).getTime() : Date.now();
-                let history = [...currentEditingHistory];
-                if (!editingId && history.length === 0) {
-                    history.unshift({
-                        id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-                        action: `建立商品 (數量: ${newQty})`,
-                        time: formData.createdAtInput || toDateLocal(Date.now()),
-                        delta: newQty
-                    });
-                }
-
-                const yarnData = {
-                    id: editingId || 'yarn_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-                    brand: formData.brand.trim() || '',
-                    color: formData.color.trim() || '',
-                    category: formData.category.trim() || '',
-                    material: formData.material.trim() || '',
-                    quantity: newQty,
-                    price: Math.max(0, Number(formData.price)),
-                    imageUrl: currentImageBase64,
-                    history: history,
-                    createdAt: createdAtVal,
-                    updatedAt: Date.now()
-                };
-
-                if (editingId) {
-                    const updated = yarns.map(y => y.id === editingId ? yarnData : y);
-                    saveToStorage(updated);
-                    if (isFirebaseActive && user && db) {
-                        db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(editingId).set(yarnData).catch(err => console.error(err));
+                try {
+                    const newQty = Math.max(0, Number(formData.quantity) || 0);
+                    const newPrice = Math.max(0, Number(formData.price) || 0);
+                    
+                    let createdAtVal = Date.now();
+                    if (formData.createdAtInput) {
+                        const parsed = new Date(formData.createdAtInput).getTime();
+                        if (!isNaN(parsed)) createdAtVal = parsed;
                     }
-                } else {
-                    const newYarnsList = [yarnData, ...yarns];
-                    saveToStorage(newYarnsList);
-                    if (isFirebaseActive && user && db) {
-                        db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(yarnData.id).set(yarnData).catch(err => console.error(err));
+
+                    let history = [...currentEditingHistory];
+                    if (!editingId && history.length === 0) {
+                        history.unshift({
+                            id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+                            action: `建立商品 (數量: ${newQty})`,
+                            time: formData.createdAtInput || toDateLocal(Date.now()),
+                            delta: newQty
+                        });
                     }
+
+                    const yarnData = {
+                        id: editingId || 'yarn_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+                        brand: (formData.brand || '').trim(),
+                        color: (formData.color || '').trim(),
+                        category: (formData.category || '').trim(),
+                        material: (formData.material || '').trim(),
+                        quantity: newQty,
+                        price: newPrice,
+                        imageUrl: currentImageBase64 || '',
+                        history: history,
+                        createdAt: createdAtVal,
+                        updatedAt: Date.now()
+                    };
+
+                    if (editingId) {
+                        const updated = yarns.map(y => y.id === editingId ? yarnData : y);
+                        saveToStorage(updated);
+                        if (isFirebaseActive && user && db) {
+                            await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(editingId).set(yarnData);
+                        }
+                    } else {
+                        const newYarnsList = [yarnData, ...yarns];
+                        saveToStorage(newYarnsList);
+                        if (isFirebaseActive && user && db) {
+                            await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(yarnData.id).set(yarnData);
+                        }
+                    }
+                    setIsFormOpen(false);
+                } catch (err) {
+                    console.error("儲存失敗", err);
+                    alert("儲存失敗：" + (err.message || "請檢查欄位格式"));
                 }
-                setIsFormOpen(false);
             };
 
-            const deleteCurrentYarn = () => {
+            const deleteCurrentYarn = async () => {
                 if (!editingId) return;
-                const updated = yarns.filter(y => y.id !== editingId);
-                saveToStorage(updated);
-                if (isFirebaseActive && user && db) {
-                    db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(editingId).delete().catch(err => console.error(err));
+                if (!confirm("確定要刪除這筆毛線資料嗎？")) return;
+                try {
+                    const updated = yarns.filter(y => y.id !== editingId);
+                    saveToStorage(updated);
+                    if (isFirebaseActive && user && db) {
+                        await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection('yarns').doc(editingId).delete();
+                    }
+                    setIsFormOpen(false);
+                } catch (err) {
+                    alert("刪除失敗：" + err.message);
                 }
-                setIsFormOpen(false);
             };
 
             const handleStockTransaction = () => {
@@ -412,32 +421,27 @@
                 const isOut = stockModalMode === 'out';
                 const currentQty = Number(formData.quantity) || 0;
                 
-                // 計算新數量
                 const newQty = isOut ? Math.max(0, currentQty - delta) : currentQty + delta;
-                const actualDelta = newQty - currentQty; // 實際變動量 (如果是出庫但庫存不足，實際扣除量會不同)
+                const actualDelta = newQty - currentQty;
                 
                 const actionDesc = isOut ? `出庫 (${actualDelta})` : `入庫 (+${actualDelta})`;
                 const newLog = {
                     id: `hist_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
                     action: actionDesc,
-                    note: stockNote.trim(),
+                    note: (stockNote || '').trim(),
                     time: stockDate || toDateLocal(Date.now()),
                     delta: actualDelta
                 };
 
-                // 同步更新表單數量
                 setFormData(prev => ({ ...prev, quantity: newQty }));
                 setEditingHistory(prev => [newLog, ...prev]);
-                
                 setStockNote('');
                 setStockDelta(1);
             };
 
             const deleteHistoryRecord = (histId) => {
-                // 找到該筆紀錄
                 const recordToDelete = currentEditingHistory.find(h => h.id === histId);
                 if (recordToDelete && recordToDelete.delta) {
-                    // 反向補償數量
                     const newQty = Math.max(0, Number(formData.quantity) - recordToDelete.delta);
                     setFormData(prev => ({ ...prev, quantity: newQty }));
                 }
@@ -475,7 +479,7 @@
                             if (cols.length >= 2) {
                                 const qty = Number(cols[4]) || 0;
                                 const createdAtVal = cols[6] ? new Date(cols[6]).getTime() : baseTime;
-                                const uniqueId = `csv_${baseTime}_${i}_${Math.random().toString(36).substring(2, 9)}`;
+                                const uniqueId = `csv_${baseTime}_${i}`;
                                 const newItem = {
                                     id: uniqueId,
                                     brand: cols[0] || '',
@@ -486,12 +490,12 @@
                                     price: Number(cols[5]) || 0,
                                     imageUrl: '',
                                     history: [{
-                                        id: `hist_${baseTime}_${i}_${Math.random().toString(36).substring(2, 9)}`,
-                                        action: `Excel 批次匯入 (數量: ${qty})`,
+                                        id: `hist_${baseTime}_${i}`,
+                                        action: `Excel 匯入 (數量: ${qty})`,
                                         time: cols[6] || toDateLocal(Date.now()),
                                         delta: qty
                                     }],
-                                    createdAt: createdAtVal,
+                                    createdAt: isNaN(createdAtVal) ? baseTime : createdAtVal,
                                     updatedAt: Date.now()
                                 };
                                 newItems.push(newItem);
@@ -507,8 +511,9 @@
                             });
                             batch.commit().catch(console.error);
                         }
+                        alert("🎉 成功匯入 Excel 資料！");
                     } catch(err) {
-                        console.error("CSV Import error", err);
+                        alert("CSV 格式解析失敗");
                     }
                 };
                 reader.readAsText(file);
@@ -593,7 +598,7 @@
                         </div>
                     </header>
 
-                    {/* Main Content (4 columns grid layout) */}
+                    {/* Main Content */}
                     <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-5">
                         {filteredYarns.length === 0 ? (
                             <div className="text-center py-24">
@@ -619,19 +624,16 @@
                                                     </div>
                                                 )}
                                                 
-                                                {/* 數量標籤 (右下角，帶白邊框，橘黃色) */}
                                                 <div className="absolute bottom-1 right-1 z-10 bg-[#FFB017] text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-sm border-2 border-white min-w-[24px] text-center">
                                                     {yarn.quantity}
                                                 </div>
                                             </div>
 
-                                            {/* 價格標籤 (左上角, 草綠色) */}
                                             <div className="absolute top-3 left-3 bg-[#84a95c] text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-sm border-2 border-white">
                                                 ¥{yarn.price}
                                             </div>
                                         </div>
 
-                                        {/* Card layout: 顏色在上(大字)，品牌與品項在左下 */}
                                         <div className="p-3.5 pt-4 flex flex-col flex-1 bg-white justify-between">
                                             <h3 className="text-base sm:text-lg font-extrabold text-[#7A4016] leading-snug line-clamp-1 mb-2">
                                                 {yarn.color || '未命名顏色'}
@@ -647,7 +649,7 @@
                         )}
                     </main>
 
-                    {/* Floating Add Button - 超大圓潤版 */}
+                    {/* Floating Add Button */}
                     <button
                         onClick={openAddForm}
                         className="fixed bottom-6 right-6 md:bottom-10 md:right-10 bg-[#FFB017] hover:bg-amber-500 text-white p-5 md:p-6 rounded-full shadow-[0_8px_25px_rgba(255,176,23,0.5)] transition-transform hover:scale-105 active:scale-95 z-40 flex items-center justify-center border-4 border-white"
@@ -684,10 +686,8 @@
                                     </div>
                                 </div>
                                 
-                                {/* Modal Body (Scrollable) */}
+                                {/* Modal Body */}
                                 <div className="overflow-y-auto flex-1 p-6 space-y-6 hide-scrollbar relative">
-                                    
-                                    {/* Image Upload Area */}
                                     <div className="flex justify-center">
                                         <div 
                                             onClick={() => imageInputRef.current?.click()}
@@ -706,7 +706,6 @@
                                         </div>
                                     </div>
 
-                                    {/* Main Form Fields */}
                                     <form id="yarnForm" className="space-y-4">
                                         <div className="grid grid-cols-2 gap-4">
                                             <AutocompleteInput label="品牌" name="brand" value={formData.brand} options={existingBrands} onChange={handleInputChange} placeholder="請輸入品牌" />
@@ -735,12 +734,9 @@
                                         </div>
                                     </form>
 
-                                    {/* Stock Management & History (心水收納風格) */}
                                     {editingId && (
                                         <div className="pt-2 pb-4">
                                             <div className="bg-[#FDF8ED] rounded-[28px] border border-amber-100 overflow-hidden shadow-sm">
-                                                
-                                                {/* Tab Header */}
                                                 <div className="flex bg-amber-100/40">
                                                     <button 
                                                         type="button" 
@@ -758,10 +754,7 @@
                                                     </button>
                                                 </div>
 
-                                                {/* Tab Content */}
                                                 <div className="p-5 space-y-4">
-                                                    
-                                                    {/* Quantity Change preview */}
                                                     <div className="flex justify-between items-center bg-white px-4 py-3 rounded-2xl border border-amber-50">
                                                         <span className="text-xs font-bold text-amber-900/70">
                                                             庫存 ( {formData.quantity} &rarr; {stockModalMode === 'out' ? Math.max(0, formData.quantity - stockDelta) : formData.quantity + Number(stockDelta)} )
@@ -774,7 +767,6 @@
                                                         </div>
                                                     </div>
 
-                                                    {/* Date & Note */}
                                                     <div className="flex justify-between items-center bg-white px-4 py-3 rounded-2xl border border-amber-50">
                                                         <span className="text-xs font-bold text-amber-900/70">日期</span>
                                                         <input type="date" value={stockDate} onChange={e => setStockDate(e.target.value)} className="bg-transparent border-none outline-none text-xs font-medium text-amber-900 text-right w-32" />
@@ -797,7 +789,6 @@
                                                         </button>
                                                     </div>
 
-                                                    {/* History List */}
                                                     {currentEditingHistory.length > 0 && (
                                                         <div className="mt-4 pt-4 border-t border-amber-100/50 space-y-2 max-h-40 overflow-y-auto hide-scrollbar">
                                                             {currentEditingHistory.map((item) => (
@@ -824,7 +815,7 @@
                                     )}
                                 </div>
                                 
-                                {/* Modal Footer (Save Button) */}
+                                {/* Modal Footer */}
                                 <div className="p-4 bg-[#FDF8ED] border-t border-amber-100 shrink-0 flex justify-center">
                                     <button 
                                         type="button"
@@ -841,7 +832,8 @@
             );
         }
 
-        ReactDOM.render(<App />, document.getElementById('root'));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
