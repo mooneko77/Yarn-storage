@@ -10,14 +10,16 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & ReactDOM (React 18) -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <!-- Piexifjs for EXIF Image Orientation Correction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/piexifjs/1.0.6/piexif.js"></script>
     
     <style>
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -155,7 +157,7 @@
             const imageInputRef = useRef(null);
 
             // ==========================================
-            // 修復加入主畫面 (PWA) 的認證與資料讀取流程
+            // 確保 PWA (加入主畫面) 與網頁端皆能正確同步
             // ==========================================
             useEffect(() => {
                 let unsubscribeDb = null;
@@ -164,7 +166,6 @@
                 if (isFirebaseActive && auth) {
                     unsubscribeAuth = auth.onAuthStateChanged(user => {
                         if (user) {
-                            // 已經有匿名身分了，開始監聽資料
                             unsubscribeDb = db.collection('yarns').onSnapshot((snapshot) => {
                                 const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                                 data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -175,7 +176,6 @@
                                 fallbackLocalStorage();
                             });
                         } else {
-                            // 如果加入主畫面變成新的空白狀態，強制重新匿名登入
                             auth.signInAnonymously().catch(err => {
                                 console.warn("匿名登入失敗", err);
                                 fallbackLocalStorage();
@@ -227,41 +227,69 @@
             const handleInputChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
             // ==========================================
-            // 修復照片上傳歪一邊 (方向顛倒問題)
+            // 完整修復手機拍照 EXIF 轉向與歪斜問題
             // ==========================================
             const handleImageUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = (event) => {
+                    const dataUrl = event.target.result;
+                    let orientation = 1;
+                    try {
+                        const exifObj = piexif.load(dataUrl);
+                        if (exifObj && exifObj['0th'] && exifObj['0th'][piexif.ImageIFD.Orientation]) {
+                            orientation = exifObj['0th'][piexif.ImageIFD.Orientation];
+                        }
+                    } catch (err) {
+                        // 無 EXIF 或解析失敗，預設不旋轉
+                    }
+
                     const img = new Image();
                     img.onload = () => {
                         const canvas = document.createElement('canvas');
-                        const MAX_SIZE = 800; // 提升一點畫質
+                        const ctx = canvas.getContext('2d');
+                        
                         let width = img.width;
                         let height = img.height;
+                        const MAX_SIZE = 800;
 
-                        // 取消強制裁切成正方形，改為等比例縮小，保留原圖方向與比例
-                        // 讓 CSS 的 object-cover 去處理正方形視覺，這樣就不會受到 EXIF 方向干擾
-                        if (width > height) {
-                            if (width > MAX_SIZE) {
+                        if (width > MAX_SIZE || height > MAX_SIZE) {
+                            if (width > height) {
                                 height = Math.round(height * (MAX_SIZE / width));
                                 width = MAX_SIZE;
-                            }
-                        } else {
-                            if (height > MAX_SIZE) {
+                            } else {
                                 width = Math.round(width * (MAX_SIZE / height));
                                 height = MAX_SIZE;
                             }
                         }
-                        
-                        canvas.width = width;
-                        canvas.height = height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, width, height);
-                        setCurrentImageBase64(canvas.toDataURL('image/jpeg', 0.7));
+
+                        if (orientation > 4) {
+                            canvas.width = height;
+                            canvas.height = width;
+                        } else {
+                            canvas.width = width;
+                            canvas.height = height;
+                        }
+
+                        ctx.save();
+                        switch (orientation) {
+                            case 2: ctx.translate(width, 0); ctx.scale(-1, 1); break;
+                            case 3: ctx.translate(width, height); ctx.rotate(Math.PI); break;
+                            case 4: ctx.translate(0, height); ctx.scale(1, -1); break;
+                            case 5: ctx.translate(height, 0); ctx.rotate(Math.PI / 2); ctx.scale(1, -1); break;
+                            case 6: ctx.translate(height, 0); ctx.rotate(Math.PI / 2); break;
+                            case 7: ctx.translate(0, width); ctx.rotate(3 * Math.PI / 2); ctx.scale(1, -1); break;
+                            case 8: ctx.translate(0, width); ctx.rotate(3 * Math.PI / 2); break;
+                            default: break;
+                        }
+
+                        ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, width, height);
+                        ctx.restore();
+
+                        setCurrentImageBase64(canvas.toDataURL('image/jpeg', 0.8));
                     };
-                    img.src = event.target.result;
+                    img.src = dataUrl;
                 };
                 reader.readAsDataURL(file);
                 if (imageInputRef.current) imageInputRef.current.value = '';
@@ -516,12 +544,9 @@
                                                 {yarn.color || '未命名'}
                                             </h3>
                                             
-                                            {/* ========================================== */}
-                                            {/* 修復排版：品牌與品項在同一橫行，並自動縮排 */}
-                                            {/* ========================================== */}
                                             <div className="flex flex-row items-center gap-1 mt-auto overflow-hidden">
-                                                <span className="font-bold text-[#8B5A2B] truncate text-[9px] shrink-0 max-w-[50%]">{yarn.brand || '無品牌'}</span>
-                                                {yarn.category && <span className="truncate bg-[#FFF6E5] text-[#A67B5B] px-1 py-0.5 rounded text-center font-bold text-[8px] flex-1">{yarn.category}</span>}
+                                                <span className="font-bold text-[#8B5A2B] truncate text-[9px] shrink-0 max-w-[50%]" title={yarn.brand}>{yarn.brand || '無品牌'}</span>
+                                                {yarn.category && <span className="truncate bg-[#FFF6E5] text-[#A67B5B] px-1 py-0.5 rounded text-center font-bold text-[8px] flex-1" title={yarn.category}>{yarn.category}</span>}
                                             </div>
                                         </div>
                                     </div>
