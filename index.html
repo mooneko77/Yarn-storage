@@ -241,9 +241,7 @@
                         if (exifObj && exifObj['0th'] && exifObj['0th'][piexif.ImageIFD.Orientation]) {
                             orientation = exifObj['0th'][piexif.ImageIFD.Orientation];
                         }
-                    } catch (err) {
-                        // 無 EXIF 或解析失敗，預設不旋轉
-                    }
+                    } catch (err) {}
 
                     const img = new Image();
                     img.onload = () => {
@@ -521,20 +519,22 @@
                                         key={yarn.id} onClick={() => openEditForm(yarn)} 
                                         className="bg-white rounded-[14px] sm:rounded-2xl overflow-hidden shadow-sm border border-amber-100 hover:shadow-md hover:border-amber-200 transition-all group flex flex-col relative cursor-pointer active:scale-95"
                                     >
-                                        <div className="aspect-square bg-[#FDF8ED] relative p-1">
-                                            <div className="w-full h-full rounded-[10px] overflow-hidden relative">
-                                                {yarn.imageUrl ? (
-                                                    <img src={yarn.imageUrl} alt="" className="w-full h-full object-cover" />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center text-amber-200 bg-amber-50">
-                                                        <span className="text-[10px] font-bold opacity-70">無圖片</span>
-                                                    </div>
-                                                )}
-                                                <div className="absolute bottom-1 right-1 z-10 bg-[#FFB017] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white min-w-[18px] text-center leading-none">
-                                                    {yarn.quantity}
+                                        {/* ========================================== */}
+                                        {/* 圖片滿版置中修正：使用 absolute inset-0 確保零留白 */}
+                                        {/* ========================================== */}
+                                        <div className="aspect-square bg-[#FDF8ED] relative overflow-hidden">
+                                            {yarn.imageUrl ? (
+                                                <img src={yarn.imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover object-center" />
+                                            ) : (
+                                                <div className="absolute inset-0 flex items-center justify-center text-amber-200 bg-amber-50">
+                                                    <span className="text-[10px] font-bold opacity-70">無圖片</span>
                                                 </div>
+                                            )}
+                                            
+                                            <div className="absolute bottom-1 right-1 z-10 bg-[#FFB017] text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white min-w-[18px] text-center leading-none">
+                                                {yarn.quantity}
                                             </div>
-                                            <div className="absolute top-1.5 left-1.5 bg-[#84a95c] text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white leading-none">
+                                            <div className="absolute top-1.5 left-1.5 z-10 bg-[#84a95c] text-white text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white leading-none">
                                                 ¥{yarn.price}
                                             </div>
                                         </div>
@@ -545,8 +545,8 @@
                                             </h3>
                                             
                                             <div className="flex flex-row items-center gap-1 mt-auto overflow-hidden">
-                                                <span className="font-bold text-[#8B5A2B] truncate text-[9px] shrink-0 max-w-[50%]" title={yarn.brand}>{yarn.brand || '無品牌'}</span>
-                                                {yarn.category && <span className="truncate bg-[#FFF6E5] text-[#A67B5B] px-1 py-0.5 rounded text-center font-bold text-[8px] flex-1" title={yarn.category}>{yarn.category}</span>}
+                                                <span className="font-bold text-[#8B5A2B] truncate text-[9px] shrink-0 max-w-[50%]">{yarn.brand || '無品牌'}</span>
+                                                {yarn.category && <span className="truncate bg-[#FFF6E5] text-[#A67B5B] px-1 py-0.5 rounded text-center font-bold text-[8px] flex-1">{yarn.category}</span>}
                                             </div>
                                         </div>
                                     </div>
@@ -589,15 +589,13 @@
                                 
                                 <div className="overflow-y-auto flex-1 p-6 space-y-6 hide-scrollbar relative">
                                     <div className="flex justify-center">
-                                        <div onClick={() => imageInputRef.current?.click()} className="w-32 h-32 rounded-[32px] border-2 border-dashed border-[#FFD98E] bg-[#FFF8E7] flex flex-col items-center justify-center cursor-pointer hover:border-[#FFB017] transition-colors overflow-hidden relative shadow-sm p-1">
-                                            <div className="w-full h-full rounded-[26px] overflow-hidden relative flex flex-col items-center justify-center">
-                                                {currentImageBase64 ? <img src={currentImageBase64} alt="" className="w-full h-full object-cover" /> : (
-                                                    <div className="flex flex-col items-center justify-center">
-                                                        <span className="text-3xl mb-1">📷</span>
-                                                        <span className="text-xs text-[#E59815] font-bold">上傳照片</span>
-                                                    </div>
-                                                )}
-                                            </div>
+                                        <div onClick={() => imageInputRef.current?.click()} className="w-32 h-32 rounded-[32px] border-2 border-dashed border-[#FFD98E] bg-[#FFF8E7] flex flex-col items-center justify-center cursor-pointer hover:border-[#FFB017] transition-colors overflow-hidden relative shadow-sm">
+                                            {currentImageBase64 ? <img src={currentImageBase64} alt="" className="absolute inset-0 w-full h-full object-cover object-center" /> : (
+                                                <div className="flex flex-col items-center justify-center">
+                                                    <span className="text-3xl mb-1">📷</span>
+                                                    <span className="text-xs text-[#E59815] font-bold">上傳照片</span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 
